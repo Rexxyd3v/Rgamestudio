@@ -1,0 +1,133 @@
+#ifndef NETWORK_MANAGER_H
+#define NETWORK_MANAGER_H
+
+// These defines MUST come before enet/enet.h to prevent Windows SDK
+// from defining conflicting names like Rectangle, DrawText, LoadImage, etc.
+#define WIN32_LEAN_AND_MEAN
+#define NOGDI
+#define NOUSER
+#include <enet/enet.h>
+#include <string>
+#include <vector>
+#include <ws2tcpip.h>
+#include "packets.h"
+
+class NetworkManager {
+public:
+    static NetworkManager& GetInstance();
+
+    bool Initialize();
+    void Shutdown();
+
+    // Host a room
+    bool HostRoom(int port = 7777);
+
+    // Join a room
+    bool JoinRoom(const std::string& ipAddress, int port = 7777);
+
+    // Disconnect or stop hosting
+    void Disconnect();
+
+    // Update ENet events (call every frame)
+    void Update();
+
+    // Check status
+    bool IsConnected() const { return isConnected; }
+    bool IsHost() const { return isHost; }
+    uint32_t GetLocalPeerID() const { return localPlayerID; } // Returns authoritative playerID (kept name for compat)
+    uint32_t GetLocalPlayerID() const { return localPlayerID; }
+    bool IsWaitingForAssignment() const { return waitingForAssignment; }
+
+    // Get local IP address for display
+    std::string GetLocalIPAddress();
+
+    // Player ready state methods
+    void SetPlayerReady(bool ready);
+    bool IsLocalPlayerReady() const;
+    bool AllPlayersReady() const;
+    int GetReadyPlayerCount() const;
+    int GetTotalPlayerCount() const;
+    bool StartGame();
+
+    // Send packets
+    void SendPacket(const void* data, size_t size, bool reliable = false);
+
+    // Received packets since last frame
+    struct NetworkEvent {
+        uint32_t senderID;
+        std::vector<uint8_t> data;
+    };
+    std::vector<NetworkEvent> GetIncomingEvents();
+
+    std::string localUsername;
+    int localSkinIndex;
+    int localKills;
+    int localDeaths;
+
+
+private:
+    NetworkManager();
+    ~NetworkManager();
+
+    ENetHost* host;
+    ENetPeer* serverPeer; // Only used by clients to point to the server
+
+    bool isHost;
+    bool isConnected;
+    uint32_t localPlayerID;   // Authoritative playerID for this client (assigned by host; 0 = host)
+    bool waitingForAssignment; // Set to true after connecting as client, waiting for ID assignment from host
+
+    // Player tracking for lobby. The PlayerInfo.peerID field is repurposed to mean
+    // "authoritative playerID assigned by the host". It is NEVER set from ENet incomingPeerID
+    // on the client side, and is always assigned by the host.
+    struct PlayerInfo {
+        uint32_t peerID;        // Authoritative playerID
+        std::string username;
+        int charSkin;
+        bool isReady;
+
+        PlayerInfo(uint32_t id, const std::string& name, int skin)
+            : peerID(id), username(name), charSkin(skin), isReady(false) {}
+    };
+    std::vector<PlayerInfo> players;
+
+    // Host-only: monotonically increasing playerID counter. IDs start at 1 (host is always 0).
+    // Once assigned, an ID is never reused within a session — disconnects do not free the ID.
+    uint32_t nextPlayerID;
+
+    // Host-only: maps the host-side ENet incomingPeerID (transport-layer index) to an
+    // authoritative playerID. This is the ONLY place ENet internals are used to look up a
+    // player. Game code must always work with the playerID.
+    // Keyed by (uint16_t)incomingPeerID; values are 0 if the slot is unused.
+    std::vector<uint16_t> incomingPeerIDToPlayerID;
+
+    std::vector<NetworkEvent> incomingEvents;
+
+public:
+    // Get player list (for lobby UI)
+    const std::vector<PlayerInfo>& GetPlayers() const { return players; }
+
+    // Add or update a player entry by authoritative playerID. Idempotent.
+    // If a player with the same ID already exists, updates username/skin. Otherwise inserts.
+    // Never creates duplicates and never generates a new ID.
+    void UpsertPlayer(uint32_t playerID, const std::string& username, int charSkin);
+
+    // Remove a player entry by authoritative playerID. Returns true if removed.
+    bool RemovePlayer(uint32_t playerID);
+
+    // Find a player entry by authoritative playerID. Returns nullptr if not present.
+    const PlayerInfo* FindPlayer(uint32_t playerID) const;
+
+    // Host-only: assign the next authoritative playerID. Never returns 0 (reserved for host).
+    uint32_t AllocatePlayerID();
+
+    // Host-only: look up the authoritative playerID for a given host-side incomingPeerID.
+    // Returns 0 if the peer is not registered (e.g., not yet assigned).
+    uint32_t GetPlayerIDForIncomingPeerID(uint16_t incomingPeerID) const;
+
+    // Host-only: register which incomingPeerID maps to which authoritative playerID.
+    void RegisterPeerMapping(uint16_t incomingPeerID, uint32_t playerID);
+    void UnregisterPeerMapping(uint16_t incomingPeerID);
+};
+
+#endif // NETWORK_MANAGER_H

@@ -1,0 +1,642 @@
+#define WIN32_LEAN_AND_MEAN
+#define NOGDI
+#define NOUSER
+#include "network_manager.h"
+#include <iostream>
+#include <cstring>
+#include <cstdlib>
+#include <ctime>
+#include <algorithm>
+
+// Note: std::srand is intentionally NOT called here. We never use rand() to generate
+// authoritative player IDs; the host hands out monotonic IDs only.
+
+NetworkManager::NetworkManager()
+    : host(nullptr),
+      serverPeer(nullptr),
+      isHost(false),
+      isConnected(false),
+      localPlayerID(0),
+      localSkinIndex(1),
+      localKills(0),
+      localDeaths(0),
+      waitingForAssignment(false),
+      nextPlayerID(1) // Host is always 0; clients start at 1, monotonically increasing
+{
+    localUsername = "Player";
+}
+
+NetworkManager::~NetworkManager() {
+    Shutdown();
+}
+
+NetworkManager& NetworkManager::GetInstance() {
+    static NetworkManager instance;
+    return instance;
+}
+
+bool NetworkManager::Initialize() {
+    // Initialize Winsock
+    WSADATA wsaData;
+    int result = WSAStartup(MAKEWORD(2, 2), &wsaData);
+    if (result != 0) {
+        std::cerr << "WSAStartup failed: " << result << std::endl;
+        return false;
+    }
+
+    if (enet_initialize() != 0) {
+        std::cerr << "An error occurred while initializing ENet." << std::endl;
+        WSACleanup();
+        return false;
+    }
+    // NOTE: do NOT call std::srand(std::time(nullptr)) here. Player IDs are not random;
+    // they are assigned monotonically by the host. This is one of the bug fixes.
+    atexit(enet_deinitialize);
+    return true;
+}
+
+void NetworkManager::Shutdown() {
+    Disconnect();
+    WSACleanup();
+}
+
+uint32_t NetworkManager::AllocatePlayerID() {
+    // Host is always 0. Clients get 1, 2, 3, ... and IDs are NEVER reused within a session.
+    uint32_t id = nextPlayerID++;
+    return id;
+}
+
+uint32_t NetworkManager::GetPlayerIDForIncomingPeerID(uint16_t incomingPeerID) const {
+    if (incomingPeerID >= incomingPeerIDToPlayerID.size()) {
+        return 0;
+    }
+    return incomingPeerIDToPlayerID[incomingPeerID];
+}
+
+void NetworkManager::RegisterPeerMapping(uint16_t incomingPeerID, uint32_t playerID) {
+    if (incomingPeerIDToPlayerID.size() <= incomingPeerID) {
+        incomingPeerIDToPlayerID.resize(incomingPeerID + 1, 0);
+    }
+    incomingPeerIDToPlayerID[incomingPeerID] = (uint16_t)playerID;
+}
+
+void NetworkManager::UnregisterPeerMapping(uint16_t incomingPeerID) {
+    if (incomingPeerID < incomingPeerIDToPlayerID.size()) {
+        incomingPeerIDToPlayerID[incomingPeerID] = 0;
+    }
+}
+
+void NetworkManager::UpsertPlayer(uint32_t playerID, const std::string& username, int charSkin) {
+    for (auto& p : players) {
+        if (p.peerID == playerID) {
+            // Update existing entry; do NOT change the ID.
+            p.username = username;
+            p.charSkin = charSkin;
+            return;
+        }
+    }
+    players.push_back(PlayerInfo(playerID, username, charSkin));
+}
+
+bool NetworkManager::RemovePlayer(uint32_t playerID) {
+    auto it = std::remove_if(players.begin(), players.end(),
+        [playerID](const PlayerInfo& p) { return p.peerID == playerID; });
+    if (it == players.end()) return false;
+    players.erase(it, players.end());
+    return true;
+}
+
+const NetworkManager::PlayerInfo* NetworkManager::FindPlayer(uint32_t playerID) const {
+    for (const auto& p : players) {
+        if (p.peerID == playerID) return &p;
+    }
+    return nullptr;
+}
+
+bool NetworkManager::HostRoom(int port) {
+    ENetAddress address;
+    address.host = ENET_HOST_ANY;
+    address.port = port;
+
+    // Up to 15 clients, 2 channels, 0 incoming/outgoing bandwidth
+    host = enet_host_create(&address, 15, 2, 0, 0);
+    if (host == nullptr) {
+        std::cerr << "An error occurred while trying to create an ENet server host." << std::endl;
+        return false;
+    }
+
+    isHost = true;
+    isConnected = true;
+    localPlayerID = 0; // Host is always 0
+
+    // Add host to player list immediately with the authoritative ID (0).
+    UpsertPlayer(0, localUsername, localSkinIndex);
+
+    std::cout << "Hosting room on port " << port << std::endl;
+    return true;
+}
+
+bool NetworkManager::JoinRoom(const std::string& ipAddress, int port) {
+    // Create a client host
+    host = enet_host_create(nullptr, 1, 2, 0, 0);
+    if (host == nullptr) {
+        std::cerr << "An error occurred while trying to create an ENet client host." << std::endl;
+        return false;
+    }
+
+    ENetAddress address;
+    enet_address_set_host(&address, ipAddress.c_str());
+    address.port = port;
+
+    serverPeer = enet_host_connect(host, &address, 2, 0);
+    if (serverPeer == nullptr) {
+        std::cerr << "No available peers for initiating an ENet connection." << std::endl;
+        enet_host_destroy(host);
+        host = nullptr;
+        return false;
+    }
+
+    // Wait up to 5 seconds for the connection attempt to succeed
+    ENetEvent event;
+    if (enet_host_service(host, &event, 5000) > 0 && event.type == ENET_EVENT_TYPE_CONNECT) {
+        std::cout << "Connection to " << ipAddress << ":" << port << " succeeded." << std::endl;
+        isHost = false;
+        isConnected = true;
+        // localPlayerID will be set when we receive the ID_ASSIGNMENT packet from the host.
+        // We MUST NOT generate one ourselves.
+        waitingForAssignment = true;
+        localPlayerID = 0; // Still 0 (unassigned) until host grants us an ID
+
+        // The players list on the client is empty until the host tells us who exists.
+        // The host will send ID_ASSIGNMENT (to us) followed by PLAYER_CONNECT (for everyone,
+        // including us). Until then, we have no players and no local ID.
+        return true;
+    } else {
+        enet_peer_reset(serverPeer);
+        std::cerr << "Connection to " << ipAddress << ":" << port << " failed." << std::endl;
+        enet_host_destroy(host);
+        host = nullptr;
+        return false;
+    }
+}
+
+void NetworkManager::Disconnect() {
+    if (host != nullptr) {
+        if (!isHost && serverPeer != nullptr) {
+            enet_peer_disconnect(serverPeer, 0);
+
+            // Allow up to 3 seconds for the disconnect to succeed
+            ENetEvent event;
+            bool disconnected = false;
+            while (enet_host_service(host, &event, 3000) > 0) {
+                if (event.type == ENET_EVENT_TYPE_RECEIVE) {
+                    enet_packet_destroy(event.packet);
+                } else if (event.type == ENET_EVENT_TYPE_DISCONNECT) {
+                    disconnected = true;
+                    std::cout << "Disconnection succeeded." << std::endl;
+                    break;
+                }
+            }
+
+            if (!disconnected) {
+                enet_peer_reset(serverPeer);
+            }
+        }
+
+        enet_host_destroy(host);
+        host = nullptr;
+        serverPeer = nullptr;
+    }
+    isConnected = false;
+    isHost = false;
+    waitingForAssignment = false;
+    localPlayerID = 0;
+    players.clear();
+    incomingEvents.clear();
+    incomingPeerIDToPlayerID.clear();
+    nextPlayerID = 1;
+}
+
+void NetworkManager::Update() {
+    if (!host) return;
+
+    incomingEvents.clear();
+    ENetEvent event;
+
+    // Process all pending events
+    while (enet_host_service(host, &event, 0) > 0) {
+        switch (event.type) {
+            case ENET_EVENT_TYPE_CONNECT: {
+                std::cout << "A new client connected from "
+                          << event.peer->address.host << ":"
+                          << event.peer->address.port << std::endl;
+                if (isHost) {
+                    // HOST side: a new client just connected. We must:
+                    //  1. Assign it a brand-new authoritative playerID (monotonic, never reused).
+                    //  2. Register the mapping: incomingPeerID -> playerID.
+                    //  3. Send ID_ASSIGNMENT to the new client only.
+                    //  4. Send the new client the full list of existing players (PLAYER_CONNECT
+                    //     for each), so it can build its player list.
+                    //  5. Broadcast a PLAYER_CONNECT for the new client to everyone else, so
+                    //     they add it to their lists.
+                    //
+                    // We do NOT use event.peer->incomingPeerID as the playerID — it's a
+                    // transport-layer slot index that ENet can reuse. PlayerIDs are
+                    // monotonic and never reused.
+
+                    uint16_t incomingPeerID = event.peer->incomingPeerID;
+                    uint32_t newPlayerID = AllocatePlayerID();
+                    RegisterPeerMapping(incomingPeerID, newPlayerID);
+
+                    // Add the new player to the host's player list immediately.
+                    // Username/skin is "Unknown" until the client announces itself; the client
+                    // will send a PLAYER_CONNECT with its info, and the host will update.
+                    UpsertPlayer(newPlayerID, "Unknown", 1);
+
+                    // Step 3: Send ID_ASSIGNMENT to the new client only.
+                    PacketIDAssignment idPkt{};
+                    idPkt.header.type = PacketType::ID_ASSIGNMENT;
+                    idPkt.header.playerID = 0; // From host
+                    idPkt.assignedID = newPlayerID;
+                    ENetPacket* idPktPtr = enet_packet_create(&idPkt, sizeof(idPkt), ENET_PACKET_FLAG_RELIABLE);
+                    enet_peer_send(event.peer, 0, idPktPtr);
+
+                    // Step 4: Send PLAYER_CONNECT for every existing player to the new client,
+                    // so it can build its own list. We use each player's authoritative playerID
+                    // in the header. The new client is NOT in this list (it doesn't know about
+                    // itself yet); it will be added in step 5.
+                    for (const auto& existingPlayer : players) {
+                        if (existingPlayer.peerID == newPlayerID) continue; // skip self
+                        PacketPlayerConnect connectPacket{};
+                        connectPacket.header.type = PacketType::PLAYER_CONNECT;
+                        connectPacket.header.playerID = existingPlayer.peerID;
+                        strncpy(connectPacket.username, existingPlayer.username.c_str(),
+                                sizeof(connectPacket.username) - 1);
+                        connectPacket.username[sizeof(connectPacket.username) - 1] = '\0';
+                        connectPacket.charSkin = existingPlayer.charSkin;
+
+                        ENetPacket* p = enet_packet_create(&connectPacket, sizeof(connectPacket),
+                                                            ENET_PACKET_FLAG_RELIABLE);
+                        enet_peer_send(event.peer, 0, p);
+                    }
+                }
+                // We do nothing special on the client side for CONNECT events.
+                break;
+            }
+
+            case ENET_EVENT_TYPE_RECEIVE: {
+                NetworkEvent netEvent;
+                if (isHost) {
+                    // Translate the transport-layer incomingPeerID to an authoritative playerID.
+                    uint16_t incomingPeerID = event.peer->incomingPeerID;
+                    uint32_t senderPlayerID = GetPlayerIDForIncomingPeerID(incomingPeerID);
+                    // If the sender isn't registered yet, drop the packet silently.
+                    // (The ID_ASSIGNMENT is sent BEFORE we expect any other traffic from
+                    // a brand-new client, but we still tolerate the race.)
+                    if (senderPlayerID == 0) {
+                        enet_packet_destroy(event.packet);
+                        break;
+                    }
+                    netEvent.senderID = senderPlayerID;
+                } else {
+                    // Client: anything we receive is from the host.
+                    netEvent.senderID = 0;
+                }
+
+                netEvent.data.resize(event.packet->dataLength);
+                std::memcpy(netEvent.data.data(), event.packet->data, event.packet->dataLength);
+
+                // Parse the packet type
+                if (netEvent.data.size() >= sizeof(PacketType)) {
+                    PacketType packetType = static_cast<PacketType>(netEvent.data[0]);
+
+                    if (packetType == PacketType::ID_ASSIGNMENT) {
+                        // CLIENT side: host just granted us an authoritative playerID.
+                        if (netEvent.data.size() >= sizeof(PacketIDAssignment)) {
+                            if (!isHost) {
+                                PacketIDAssignment* idPkt =
+                                    reinterpret_cast<PacketIDAssignment*>(netEvent.data.data());
+                                localPlayerID = idPkt->assignedID;
+                                waitingForAssignment = false;
+                                std::cout << "[Client] Assigned playerID=" << localPlayerID << std::endl;
+
+                                // Send a PLAYER_CONNECT announcement back to the host with our
+                                // name and skin. The host will rebroadcast to everyone (so they
+                                // can update our entry from "Unknown" to the real name).
+                                // The header.playerID is the authoritative one the host just gave us.
+                                PacketPlayerConnect announce{};
+                                announce.header.type = PacketType::PLAYER_CONNECT;
+                                announce.header.playerID = localPlayerID;
+                                strncpy(announce.username, localUsername.c_str(),
+                                        sizeof(announce.username) - 1);
+                                announce.username[sizeof(announce.username) - 1] = '\0';
+                                announce.charSkin = localSkinIndex;
+                                ENetPacket* p = enet_packet_create(
+                                    &announce, sizeof(announce), ENET_PACKET_FLAG_RELIABLE);
+                                enet_peer_send(serverPeer, 0, p);
+
+                                // Add ourselves to our own local player list too. (The host will
+                                // also send a PLAYER_CONNECT for us via the rebroadcast — but
+                                // adding it here is idempotent thanks to UpsertPlayer.)
+                                UpsertPlayer(localPlayerID, localUsername, localSkinIndex);
+                            }
+                            // Host ignores this packet type.
+                        }
+                        // Do not enqueue this packet for the game — it's network-manager-internal.
+                        enet_packet_destroy(event.packet);
+                        break;
+                    }
+
+                    if (packetType == PacketType::PLAYER_CONNECT) {
+                        // PLAYER_CONNECT is only ever emitted by the HOST. Clients never
+                        // generate their own. Both host and clients process it the same way:
+                        // add or update a player entry by authoritative playerID.
+                        if (netEvent.data.size() >= sizeof(PacketPlayerConnect)) {
+                            PacketPlayerConnect* connectPacket =
+                                reinterpret_cast<PacketPlayerConnect*>(netEvent.data.data());
+
+                            uint32_t playerID = connectPacket->header.playerID;
+                            std::string uname(connectPacket->username);
+                            int skin = connectPacket->charSkin;
+
+                            // Dedupe + update in one shot. Never creates Unknown duplicates
+                            // because the host always sends the canonical entry.
+                            UpsertPlayer(playerID, uname, skin);
+
+                            if (isHost) {
+                                // Host: rebroadcast to all OTHER connected clients so they
+                                // also upsert this player. We rewrite the header to use the
+                                // authoritative playerID (which is already in the packet),
+                                // and we never forward the original sender's other fields.
+                                for (size_t i = 0; i < host->peerCount; ++i) {
+                                    ENetPeer* peer = &host->peers[i];
+                                    if (peer == event.peer) continue;
+                                    if (peer->state != ENET_PEER_STATE_CONNECTED) continue;
+                                    ENetPacket* p = enet_packet_create(
+                                        netEvent.data.data(), netEvent.data.size(),
+                                        ENET_PACKET_FLAG_RELIABLE);
+                                    enet_peer_send(peer, 0, p);
+                                }
+                            }
+                        }
+                    } else if (packetType == PacketType::PLAYER_READY) {
+                        if (netEvent.data.size() >= sizeof(PacketPlayerReady)) {
+                            PacketPlayerReady* readyPacket =
+                                reinterpret_cast<PacketPlayerReady*>(netEvent.data.data());
+
+                            uint32_t pid = readyPacket->header.playerID;
+                            for (auto& player : players) {
+                                if (player.peerID == pid) {
+                                    player.isReady = readyPacket->isReady;
+                                    break;
+                                }
+                            }
+
+                            if (isHost) {
+                                for (size_t i = 0; i < host->peerCount; ++i) {
+                                    ENetPeer* peer = &host->peers[i];
+                                    if (peer == event.peer) continue;
+                                    if (peer->state != ENET_PEER_STATE_CONNECTED) continue;
+                                    ENetPacket* p = enet_packet_create(
+                                        netEvent.data.data(), netEvent.data.size(),
+                                        ENET_PACKET_FLAG_RELIABLE);
+                                    enet_peer_send(peer, 0, p);
+                                }
+                            }
+                        }
+                    } else if (packetType == PacketType::PLAYER_UPDATE) {
+                        // PLAYER_UPDATE is sent by clients (their own state) and rebroadcast by
+                        // the host to everyone else. The host's incomingPeerID-to-playerID map
+                        // ensures the rebroadcasted packet always carries the correct
+                        // authoritative playerID.
+                        if (isHost) {
+                            for (size_t i = 0; i < host->peerCount; ++i) {
+                                ENetPeer* peer = &host->peers[i];
+                                if (peer == event.peer) continue;
+                                if (peer->state != ENET_PEER_STATE_CONNECTED) continue;
+                                ENetPacket* p = enet_packet_create(
+                                    netEvent.data.data(), netEvent.data.size(), 0); // unreliable
+                                enet_peer_send(peer, 0, p);
+                            }
+                        }
+                    } else if (packetType == PacketType::PLAYER_SHOOT) {
+                        if (isHost) {
+                            for (size_t i = 0; i < host->peerCount; ++i) {
+                                ENetPeer* peer = &host->peers[i];
+                                if (peer == event.peer) continue;
+                                if (peer->state != ENET_PEER_STATE_CONNECTED) continue;
+                                ENetPacket* p = enet_packet_create(
+                                    netEvent.data.data(), netEvent.data.size(),
+                                    ENET_PACKET_FLAG_RELIABLE);
+                                enet_peer_send(peer, 0, p);
+                            }
+                        }
+                    } else if (packetType == PacketType::PLAYER_DAMAGE) {
+                        if (isHost) {
+                            for (size_t i = 0; i < host->peerCount; ++i) {
+                                ENetPeer* peer = &host->peers[i];
+                                if (peer == event.peer) continue;
+                                if (peer->state != ENET_PEER_STATE_CONNECTED) continue;
+                                ENetPacket* p = enet_packet_create(
+                                    netEvent.data.data(), netEvent.data.size(),
+                                    ENET_PACKET_FLAG_RELIABLE);
+                                enet_peer_send(peer, 0, p);
+                            }
+                        }
+                    } else if (packetType == PacketType::PLAYER_KILLED) {
+                        if (isHost) {
+                            for (size_t i = 0; i < host->peerCount; ++i) {
+                                ENetPeer* peer = &host->peers[i];
+                                if (peer == event.peer) continue;
+                                if (peer->state != ENET_PEER_STATE_CONNECTED) continue;
+                                ENetPacket* p = enet_packet_create(
+                                    netEvent.data.data(), netEvent.data.size(),
+                                    ENET_PACKET_FLAG_RELIABLE);
+                                enet_peer_send(peer, 0, p);
+                            }
+                        }
+                    } else if (packetType == PacketType::PLAYER_RESPAWN) {
+                        if (isHost) {
+                            for (size_t i = 0; i < host->peerCount; ++i) {
+                                ENetPeer* peer = &host->peers[i];
+                                if (peer == event.peer) continue;
+                                if (peer->state != ENET_PEER_STATE_CONNECTED) continue;
+                                ENetPacket* p = enet_packet_create(
+                                    netEvent.data.data(), netEvent.data.size(),
+                                    ENET_PACKET_FLAG_RELIABLE);
+                                enet_peer_send(peer, 0, p);
+                            }
+                        }
+                    } else if (packetType == PacketType::PLAYER_DISCONNECT) {
+                        if (isHost) {
+                            for (size_t i = 0; i < host->peerCount; ++i) {
+                                ENetPeer* peer = &host->peers[i];
+                                if (peer == event.peer) continue;
+                                if (peer->state != ENET_PEER_STATE_CONNECTED) continue;
+                                ENetPacket* p = enet_packet_create(
+                                    netEvent.data.data(), netEvent.data.size(),
+                                    ENET_PACKET_FLAG_RELIABLE);
+                                enet_peer_send(peer, 0, p);
+                            }
+                        }
+                    }
+                }
+                incomingEvents.push_back(netEvent);
+
+                enet_packet_destroy(event.packet);
+                break;
+            }
+
+            case ENET_EVENT_TYPE_DISCONNECT:
+                std::cout << "Client disconnected." << std::endl;
+                if (isHost) {
+                    // Translate incomingPeerID -> authoritative playerID, then remove.
+                    uint16_t incomingPeerID = event.peer->incomingPeerID;
+                    uint32_t disconnectedPlayerID = GetPlayerIDForIncomingPeerID(incomingPeerID);
+                    if (disconnectedPlayerID != 0) {
+                        RemovePlayer(disconnectedPlayerID);
+                        UnregisterPeerMapping(incomingPeerID);
+
+                        // Broadcast disconnect to remaining clients.
+                        PacketPlayerDisconnectHeader disconnectPacket{};
+                        disconnectPacket.header.type = PacketType::PLAYER_DISCONNECT;
+                        disconnectPacket.header.playerID = disconnectedPlayerID;
+
+                        for (size_t i = 0; i < host->peerCount; ++i) {
+                            ENetPeer* peer = &host->peers[i];
+                            if (peer == event.peer) continue;
+                            if (peer->state != ENET_PEER_STATE_CONNECTED) continue;
+                            ENetPacket* p = enet_packet_create(&disconnectPacket,
+                                                              sizeof(disconnectPacket),
+                                                              ENET_PACKET_FLAG_RELIABLE);
+                            enet_peer_send(peer, 0, p);
+                        }
+                    }
+                } else {
+                    // Client side: the host disconnected. Clear everything; the user
+                    // will probably go back to the main menu.
+                    players.clear();
+                    localPlayerID = 0;
+                    waitingForAssignment = false;
+                }
+                break;
+
+            case ENET_EVENT_TYPE_NONE:
+                break;
+        }
+    }
+}
+
+std::string NetworkManager::GetLocalIPAddress() {
+    char hostbuffer[256];
+    char *IPbuffer;
+    struct hostent *host_entry;
+    int hostname;
+
+    // To retrieve hostname
+    hostname = gethostname(hostbuffer, sizeof(hostbuffer));
+    if (hostname == -1) {
+        return "127.0.0.1";
+    }
+
+    // To retrieve host information
+    host_entry = gethostbyname(hostbuffer);
+    if (host_entry == nullptr) {
+        return "127.0.0.1";
+    }
+
+    // Convert an Internet network address into ASCII string
+    IPbuffer = inet_ntoa(*((struct in_addr*) host_entry->h_addr_list[0]));
+
+    return std::string(IPbuffer);
+}
+
+void NetworkManager::SendPacket(const void* data, size_t size, bool reliable) {
+    if (!host || !isConnected) return;
+
+    // Defensive: a client must have a non-zero localPlayerID before sending anything that
+    // requires player identity. The host is always ID 0.
+    if (!isHost && localPlayerID == 0) {
+        // Allow non-player-tagged packets (none currently), otherwise drop.
+        // For safety, drop all packets until the host grants us an ID.
+        return;
+    }
+
+    ENetPacket* packet = enet_packet_create(data, size, reliable ? ENET_PACKET_FLAG_RELIABLE : 0);
+
+    if (isHost) {
+        // Broadcast to all clients
+        enet_host_broadcast(host, 0, packet);
+    } else {
+        // Send to server
+        enet_peer_send(serverPeer, 0, packet);
+    }
+}
+
+std::vector<NetworkManager::NetworkEvent> NetworkManager::GetIncomingEvents() {
+    return incomingEvents;
+}
+
+void NetworkManager::SetPlayerReady(bool ready) {
+    // Find the local player in the list (or, if the client hasn't been assigned yet, no-op).
+    if (localPlayerID == 0 && !isHost) return;
+
+    for (auto& player : players) {
+        if (player.peerID == localPlayerID) {
+            player.isReady = ready;
+
+            PacketPlayerReady readyPacket{};
+            readyPacket.header.type = PacketType::PLAYER_READY;
+            readyPacket.header.playerID = localPlayerID;
+            readyPacket.isReady = ready;
+
+            SendPacket(&readyPacket, sizeof(readyPacket), true);
+            break;
+        }
+    }
+}
+
+bool NetworkManager::IsLocalPlayerReady() const {
+    for (const auto& player : players) {
+        if (player.peerID == localPlayerID) {
+            return player.isReady;
+        }
+    }
+    return false;
+}
+
+bool NetworkManager::AllPlayersReady() const {
+    if (players.empty()) return false;
+
+    for (const auto& player : players) {
+        if (!player.isReady) {
+            return false;
+        }
+    }
+    return true;
+}
+
+int NetworkManager::GetReadyPlayerCount() const {
+    int count = 0;
+    for (const auto& player : players) {
+        if (player.isReady) {
+            count++;
+        }
+    }
+    return count;
+}
+
+int NetworkManager::GetTotalPlayerCount() const {
+    return static_cast<int>(players.size());
+}
+
+bool NetworkManager::StartGame() {
+    if (!isHost) return false;
+
+    PacketGameStart startPacket{};
+    startPacket.header.type = PacketType::GAME_START;
+    startPacket.header.playerID = localPlayerID; // Host's ID is 0
+
+    SendPacket(&startPacket, sizeof(startPacket), true);
+    return true;
+}
