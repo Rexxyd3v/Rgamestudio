@@ -22,6 +22,8 @@ void Player::Update(float deltaTime) {
         return;
     }
 
+    UpdateSkills(deltaTime);
+
     if (currentShootCooldown > 0) currentShootCooldown -= deltaTime;
 
     // ---- JUMP ----
@@ -56,6 +58,14 @@ void Player::Update(float deltaTime) {
         velocity.y *= 0.7071f;
     }
 
+    // ---- SKILLS ----
+    if (IsKeyPressed(KEY_LEFT_SHIFT) || IsKeyPressed(KEY_RIGHT_SHIFT)) {
+        ActivateDash(velocity);
+    }
+    if (IsKeyPressed(KEY_E)) {
+        ActivateShield();
+    }
+
     position.x += velocity.x * deltaTime;
     position.y += velocity.y * deltaTime;
 
@@ -74,14 +84,16 @@ void Player::Update(float deltaTime) {
     if (aimTarget.x < position.x) faceDirection = -1;
     else                           faceDirection =  1;
 
-    // ---- SHOOT & SWITCH WEAPONS ----
+    // ---- SHOOT, RELOAD & SWITCH WEAPONS ----
     if (playerIndex == 0) {
         if (IsMouseButtonDown(MOUSE_LEFT_BUTTON) || IsKeyDown(KEY_Z)) Shoot(aimTarget);
+        if (IsKeyPressed(KEY_R)) TriggerReload();
         if (IsKeyPressed(KEY_ONE)) SwitchWeapon(0);
         if (IsKeyPressed(KEY_TWO)) SwitchWeapon(1);
         if (IsKeyPressed(KEY_THREE)) SwitchWeapon(2);
     } else {
         if (IsKeyDown(KEY_M) || IsKeyDown(KEY_KP_0)) Shoot(aimTarget);
+        if (IsKeyPressed(KEY_R)) TriggerReload();
         if (IsKeyPressed(KEY_SEVEN)) SwitchWeapon(0);
         if (IsKeyPressed(KEY_EIGHT)) SwitchWeapon(1);
         if (IsKeyPressed(KEY_NINE)) SwitchWeapon(2);

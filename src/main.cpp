@@ -13,7 +13,9 @@
 
 int main() {
     SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_VSYNC_HINT);
+    SetTraceLogLevel(LOG_WARNING); // Suppress INFO logs (texture loading spam = slow startup)
     InitWindow(VIRTUAL_WIDTH, VIRTUAL_HEIGHT, "RJ - Intro");
+    InitAudioDevice(); // Initialize audio device
     SetTargetFPS(60);
 
     NetworkManager::GetInstance().Initialize();
@@ -114,6 +116,7 @@ int main() {
     TextureManager::UnloadAll();
     NetworkManager::GetInstance().Shutdown();
     
+    CloseAudioDevice(); // Close audio device
     CloseWindow();
     return 0;
 }

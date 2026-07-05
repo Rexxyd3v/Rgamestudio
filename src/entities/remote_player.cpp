@@ -37,6 +37,8 @@ void RemotePlayer::ApplyNetworkUpdate(Vector2 pos, int state, int weaponIndex, i
 }
 
 void RemotePlayer::Update(float deltaTime) {
+    UpdateSkills(deltaTime);
+
     // Only update the animation timer, no keyboard input
     if (animations.count(currentState)) {
         animations[currentState]->Update(deltaTime);

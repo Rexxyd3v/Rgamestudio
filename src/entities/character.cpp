@@ -3,10 +3,78 @@
 #include <math.h>
 #include <iostream>
 
+struct WeaponStats {
+    int maxAmmo;
+    float reloadTime;
+    float fireRate;
+    float bulletSpeed;
+    float bulletRange;
+    float damage;
+};
+
+static const WeaponStats WEAPONS[] = {
+    { 30, 1.5f, 0.15f, 1000.0f, 500.0f, 12.0f }, // SMG (Weapon 1)
+    { 6,  2.0f, 0.8f,  700.0f,  350.0f, 40.0f }, // Shotgun (Weapon 2)
+    { 12, 1.2f, 0.4f,  750.0f,  900.0f, 20.0f }  // Pistol (Weapon 3)
+};
+
+static void PlayWeaponSound(int index) {
+    static Sound sounds[3] = { {0}, {0}, {0} };
+    static bool loaded[3] = { false, false, false };
+    
+    std::string paths[3] = {
+        "assets/weapon1.mp3", // Weapon 1 (SMG)
+        "assets/weapon3.mp3", // Weapon 2 (Shotgun)
+        "assets/weapon2.mp3"  // Weapon 3 (Pistol)
+    };
+    
+    if (index >= 0 && index < 3) {
+        if (!loaded[index]) {
+            Wave wave = LoadWave(paths[index].c_str());
+            if (IsWaveValid(wave)) {
+                // Convert wave format to 16-bit mono for easy silence detection
+                WaveFormat(&wave, wave.sampleRate, 16, 1);
+                short* samples = (short*)wave.data;
+                unsigned int firstActiveFrame = 0;
+                int threshold = 150; // silence threshold
+                for (unsigned int i = 0; i < wave.frameCount; ++i) {
+                    short val = samples[i];
+                    if ((val < 0 ? -val : val) > threshold) {
+                        firstActiveFrame = i;
+                        break;
+                    }
+                }
+                if (firstActiveFrame > 0) {
+                    WaveCrop(&wave, firstActiveFrame, wave.frameCount - 1);
+                }
+                sounds[index] = LoadSoundFromWave(wave);
+                UnloadWave(wave);
+            } else {
+                sounds[index] = LoadSound(paths[index].c_str());
+            }
+            loaded[index] = true;
+        }
+        if (IsSoundValid(sounds[index])) {
+            PlaySound(sounds[index]);
+        }
+    }
+}
+
 Character::Character(Vector2 startPosition, const std::string& assetPath, float scale)
     : position(startPosition), faceDirection(1), currentState(CharState::IDLE),
-      scale(scale), health(100.0f), speed(150.0f), shootCooldown(0.3f), currentShootCooldown(0.0f),
-      jumpHeight(0.0f), jumpVelocity(0.0f), baseHeight(0.0f), floorHeight(0.0f), weaponRotation(0.0f), justShot(false) {
+      scale(scale), health(100.0f), speed(150.0f), shootCooldown(0.15f), currentShootCooldown(0.0f),
+      jumpHeight(0.0f), jumpVelocity(0.0f), baseHeight(0.0f), floorHeight(0.0f), weaponRotation(0.0f),
+      justShot(false), isMonster(false), kills(0), deaths(0), muzzleFlashTimer(0.0f),
+      dashTimer(0.0f), dashCooldown(0.0f), dashDirection{0.0f, 0.0f}, shieldTimer(0.0f), shieldCooldown(0.0f),
+      reloadTimer(0.0f), lastHitTimer(0.0f) {
+
+    for (int i = 0; i < 3; ++i) {
+        ammo[i] = WEAPONS[i].maxAmmo;
+    }
+
+    if (assetPath.find("Enemies/") != std::string::npos) {
+        isMonster = true;
+    }
 
     aimTarget = { startPosition.x + 100.0f, startPosition.y };
     velocity  = { 0.0f, 0.0f };
@@ -24,9 +92,15 @@ Character::~Character() {
 }
 
 void Character::LoadAnimations(const std::string& baseDir) {
-    animations[CharState::IDLE]  = new Animation(baseDir + "idle_",  6,  0.10f, true);
-    animations[CharState::WALK]  = new Animation(baseDir + "walk_",  8,  0.08f, true);
-    animations[CharState::DEATH] = new Animation(baseDir + "death_", 10, 0.10f, false);
+    if (baseDir.find("Enemy 3") != std::string::npos) {
+        animations[CharState::IDLE]  = new Animation(baseDir + "fly_",  6,  0.10f, true);
+        animations[CharState::WALK]  = new Animation(baseDir + "fly_",  6,  0.08f, true);
+        animations[CharState::DEATH] = new Animation(baseDir + "fly_",  6,  0.10f, false);
+    } else {
+        animations[CharState::IDLE]  = new Animation(baseDir + "idle_",  6,  0.10f, true);
+        animations[CharState::WALK]  = new Animation(baseDir + "walk_",  8,  0.08f, true);
+        animations[CharState::DEATH] = new Animation(baseDir + "death_", 10, 0.10f, false);
+    }
 }
 
 void Character::SetState(CharState newState) {
@@ -37,7 +111,9 @@ void Character::SetState(CharState newState) {
 }
 
 void Character::TakeDamage(float amount) {
+    if (shieldTimer > 0.0f) return; // Shield absorbs all damage
     health -= amount;
+    lastHitTimer = 3.0f; // show health bar for 3 seconds when hit
     if (health <= 0) {
         health = 0;
         SetState(CharState::DEATH);
@@ -47,8 +123,10 @@ void Character::TakeDamage(float amount) {
 float Character::GetHealth() const { return health; }
 
 void Character::SwitchWeapon(int index) {
-    if (index >= 0 && index < weaponTextures.size()) {
+    if (index >= 0 && index < (int)weaponTextures.size()) {
         currentWeaponIndex = index;
+        shootCooldown = WEAPONS[index].fireRate;
+        reloadTimer = 0.0f; // cancel ongoing reload
     }
 }
 
@@ -63,8 +141,15 @@ Vector2 Character::GetHandPosition() const {
 
 bool Character::Shoot(Vector2 targetPos) {
     if (IsDead()) return false;
+    if (reloadTimer > 0.0f) return false; // cannot shoot while reloading
+    if (ammo[currentWeaponIndex] <= 0) {
+        TriggerReload(); // automatically reload if empty
+        return false;
+    }
+
     if (currentShootCooldown <= 0.0f) {
         currentShootCooldown = shootCooldown;
+        ammo[currentWeaponIndex]--;
 
         Vector2 hand = GetHandPosition();
         float dx = targetPos.x - hand.x;
@@ -73,12 +158,22 @@ bool Character::Shoot(Vector2 targetPos) {
 
         if (len > 1.0f) {
             Vector2 dir = { dx / len, dy / len };
-            // Muzzle: offset a bit along the aim direction from the hand
             float muzzleOff = 20.0f;
             Vector2 projPos = { hand.x + dir.x * muzzleOff,
                                 hand.y + dir.y * muzzleOff };
-            projectiles.push_back(std::make_shared<Projectile>(projPos, dir, 700.0f));
+
+            float bSpeed = WEAPONS[currentWeaponIndex].bulletSpeed;
+            float bRange = WEAPONS[currentWeaponIndex].bulletRange;
+            float bDamage = WEAPONS[currentWeaponIndex].damage;
+
+            if (isMonster) {
+                projectiles.push_back(std::make_shared<Projectile>(projPos, dir, bSpeed, bRange, bDamage, RED, MAROON));
+            } else {
+                projectiles.push_back(std::make_shared<Projectile>(projPos, dir, bSpeed, bRange, bDamage));
+            }
             justShot = true;
+            muzzleFlashTimer = 0.08f; // Show muzzle flash
+            PlayWeaponSound(currentWeaponIndex); // play gun sound
             return true;
         }
     }
@@ -91,14 +186,49 @@ void Character::ShootInDirection(Vector2 dir) {
     Vector2 hand = GetHandPosition();
     float muzzleOff = 20.0f;
     Vector2 projPos = { hand.x + dir.x * muzzleOff, hand.y + dir.y * muzzleOff };
-    projectiles.push_back(std::make_shared<Projectile>(projPos, dir, 700.0f));
+
+    float bSpeed = WEAPONS[currentWeaponIndex].bulletSpeed;
+    float bRange = WEAPONS[currentWeaponIndex].bulletRange;
+    float bDamage = WEAPONS[currentWeaponIndex].damage;
+
+    projectiles.push_back(std::make_shared<Projectile>(projPos, dir, bSpeed, bRange, bDamage));
+    PlayWeaponSound(currentWeaponIndex); // play gun sound for remote players
 }
 
 void Character::Draw() {
     float draw_y = position.y - jumpHeight;
     animations[currentState]->Draw({ position.x, draw_y }, faceDirection, scale);
 
-    if (!IsDead() && weaponTextures.size() > 0 && weaponTextures[currentWeaponIndex].id != 0) {
+    // Overhead hit indicator health bar
+    if (lastHitTimer > 0.0f && !IsDead()) {
+        float barW = 60.0f;
+        float barH = 6.0f;
+        Vector2 barPos = { position.x - barW / 2.0f, draw_y - 12.0f };
+        // Background
+        DrawRectangle((int)barPos.x, (int)barPos.y, (int)barW, (int)barH, {60, 60, 60, 200});
+        // Health fill
+        float fillW = barW * (health / 100.0f);
+        if (fillW > 0.0f) {
+            Color barColor = isMonster ? RED : GREEN;
+            DrawRectangle((int)barPos.x, (int)barPos.y, (int)fillW, (int)barH, barColor);
+        }
+        // Outline
+        DrawRectangleLines((int)barPos.x, (int)barPos.y, (int)barW, (int)barH, {200, 200, 200, 230});
+    }
+
+    if (shieldTimer > 0.0f) {
+        // Draw a glowing shield bubble centered on the character
+        DrawCircleLines((int)position.x, (int)draw_y + 30, 42.0f, SKYBLUE);
+        DrawCircleLines((int)position.x, (int)draw_y + 30, 44.0f, BLUE);
+    }
+
+    // Update muzzle flash timer
+    // (we tick it here since Draw is called every frame and avoids adding an Update call to the base class)
+    // Note: Not perfectly frame-rate independent but sufficient for a quick flash effect
+    static float lastFrameTime = 0.016f;
+    if (muzzleFlashTimer > 0.0f) muzzleFlashTimer -= GetFrameTime();
+
+    if (!isMonster && !IsDead() && weaponTextures.size() > 0 && weaponTextures[currentWeaponIndex].id != 0) {
         Texture2D currentTex = weaponTextures[currentWeaponIndex];
         float weaponScale = scale * 0.45f;
         Vector2 hand = GetHandPosition();
@@ -124,6 +254,30 @@ void Character::Draw() {
                               (float)currentTex.height * weaponScale };
         Vector2 origin = { pivotX, pivotY };
         DrawTexturePro(currentTex, srcRec, dstRec, origin, rotation, WHITE);
+
+        // Draw muzzle flash if recently fired
+        if (muzzleFlashTimer > 0.0f) {
+            Texture2D muzzleTex = TextureManager::GetTexture(
+                "assets/Free 2D Animated Vector Game Character Sprites/"
+                "Free 2D Animated Vector Game Character Sprites/Extras/muzzle.png");
+            if (muzzleTex.id != 0) {
+                float muzzleScale = scale * 0.55f;
+                // Compute barrel tip position (a bit further along the aim direction from the hand)
+                float dx2 = aimTarget.x - hand.x;
+                float dy2 = aimTarget.y - hand.y;
+                float len2 = sqrtf(dx2*dx2 + dy2*dy2);
+                Vector2 muzzleDir = (len2 > 0.1f) ? Vector2{dx2/len2, dy2/len2} : Vector2{1.0f, 0.0f};
+                Vector2 muzzlePos = { hand.x + muzzleDir.x * 40.0f, hand.y + muzzleDir.y * 40.0f };
+
+                Rectangle mSrc = { 0, 0, (float)muzzleTex.width * faceDirection, (float)muzzleTex.height };
+                Rectangle mDst = { muzzlePos.x, muzzlePos.y,
+                                   (float)muzzleTex.width * muzzleScale,
+                                   (float)muzzleTex.height * muzzleScale };
+                Vector2 mOrigin = { (float)muzzleTex.width * muzzleScale / 2.0f,
+                                    (float)muzzleTex.height * muzzleScale / 2.0f };
+                DrawTexturePro(muzzleTex, mSrc, mDst, mOrigin, rotation, WHITE);
+            }
+        }
     }
 
     for (auto& proj : projectiles) proj->Draw();
@@ -147,5 +301,71 @@ void Character::UpdatePhysics(float deltaTime) {
         // Floor was raised (landed on platform) — snap up
         jumpHeight   = floorHeight;
         jumpVelocity = 0.0f;
+    }
+}
+
+bool Character::ActivateDash(Vector2 direction) {
+    if (dashCooldown <= 0.0f && dashTimer <= 0.0f) {
+        dashTimer = 0.15f;
+        dashCooldown = 2.0f;
+        float len = sqrtf(direction.x * direction.x + direction.y * direction.y);
+        if (len > 0.01f) {
+            dashDirection = { direction.x / len, direction.y / len };
+        } else {
+            dashDirection = { (float)faceDirection, 0.0f };
+        }
+        return true;
+    }
+    return false;
+}
+
+bool Character::ActivateShield() {
+    if (shieldCooldown <= 0.0f && shieldTimer <= 0.0f) {
+        shieldTimer = 2.0f;
+        shieldCooldown = 6.0f;
+        return true;
+    }
+    return false;
+}
+
+void Character::UpdateSkills(float deltaTime) {
+    if (dashTimer > 0.0f) {
+        dashTimer -= deltaTime;
+        float dashSpeed = speed * 3.0f;
+        position.x += dashDirection.x * dashSpeed * deltaTime;
+        position.y += dashDirection.y * dashSpeed * deltaTime;
+    }
+    if (dashCooldown > 0.0f) dashCooldown -= deltaTime;
+
+    if (shieldTimer > 0.0f) shieldTimer -= deltaTime;
+    if (shieldCooldown > 0.0f) shieldCooldown -= deltaTime;
+
+    // Reloading timer tick
+    if (reloadTimer > 0.0f) {
+        reloadTimer -= deltaTime;
+        if (reloadTimer <= 0.0f) {
+            ammo[currentWeaponIndex] = WEAPONS[currentWeaponIndex].maxAmmo;
+        }
+    }
+
+    // Overhead hit indicator timer tick
+    if (lastHitTimer > 0.0f) lastHitTimer -= deltaTime;
+}
+
+int Character::GetAmmo() const {
+    return ammo[currentWeaponIndex];
+}
+
+int Character::GetMaxAmmo() const {
+    return WEAPONS[currentWeaponIndex].maxAmmo;
+}
+
+bool Character::IsReloading() const {
+    return reloadTimer > 0.0f;
+}
+
+void Character::TriggerReload() {
+    if (reloadTimer <= 0.0f && ammo[currentWeaponIndex] < WEAPONS[currentWeaponIndex].maxAmmo) {
+        reloadTimer = WEAPONS[currentWeaponIndex].reloadTime;
     }
 }

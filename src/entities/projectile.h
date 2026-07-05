@@ -5,7 +5,7 @@
 
 class Projectile {
 public:
-    Projectile(Vector2 startPosition, Vector2 direction, float speed);
+    Projectile(Vector2 startPosition, Vector2 direction, float speed, float maxDistance, float damage, Color fillColor = YELLOW, Color lineColor = ORANGE);
     ~Projectile();
 
     void    Update(float deltaTime);
@@ -13,6 +13,7 @@ public:
     bool    IsActive() const;
     void    Deactivate();   // Force-deactivate on hit
     Vector2 GetPosition() const;
+    float   GetDamage() const { return damage; }
 
 private:
     Vector2 position;
@@ -21,6 +22,9 @@ private:
     bool    active;
     float   maxDistance;
     float   distanceTraveled;
+    float   damage;
+    Color   fillColor;
+    Color   lineColor;
 };
 
 #endif // PROJECTILE_H

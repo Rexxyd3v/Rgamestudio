@@ -43,7 +43,11 @@ private:
 
     Texture2D bgTex1;
     Texture2D bgTex2;
-    Texture2D rockTex;
+    Texture2D bgDetail; // pebble detail layer
+    Texture2D rockTex;  // rock3
+    Texture2D rockTex1; // rock1
+    Texture2D rockTex2; // rock2
+    float worldTime;    // accumulates delta for animations
 
     float spawnTimer;
     float netSendTimer;
@@ -58,6 +62,8 @@ private:
     void  CheckCollisions();
     Character* GetNearestEnemy(Vector2 pos);
     Character* GetNearestPlayerOrCompanion(Vector2 pos);
+    Vector2 GetFarSpawnPoint();
+    Character* GetNearestTargetForBot(BotEnemy* b);
 };
 
 #endif

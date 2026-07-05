@@ -2,9 +2,10 @@
 #include "projectile.h"
 #include <math.h>
 
-Projectile::Projectile(Vector2 startPosition, Vector2 direction, float speed)
+Projectile::Projectile(Vector2 startPosition, Vector2 direction, float speed, float maxDistance, float damage, Color fillColor, Color lineColor)
     : position(startPosition), direction(direction), speed(speed),
-      active(true), maxDistance(1200.0f), distanceTraveled(0.0f) {
+      active(true), maxDistance(maxDistance), distanceTraveled(0.0f),
+      damage(damage), fillColor(fillColor), lineColor(lineColor) {
 }
 
 Projectile::~Projectile() {}
@@ -27,8 +28,8 @@ void Projectile::Update(float deltaTime) {
 
 void Projectile::Draw() {
     if (!active) return;
-    DrawCircle((int)position.x, (int)position.y, 4.0f, YELLOW);
-    DrawCircleLines((int)position.x, (int)position.y, 4.5f, ORANGE);
+    DrawCircle((int)position.x, (int)position.y, 4.0f, fillColor);
+    DrawCircleLines((int)position.x, (int)position.y, 4.5f, lineColor);
 }
 
 void Projectile::Deactivate() {

@@ -8,8 +8,7 @@
 #include <ctime>
 #include <algorithm>
 
-// Note: std::srand is intentionally NOT called here. We never use rand() to generate
-// authoritative player IDs; the host hands out monotonic IDs only.
+
 
 NetworkManager::NetworkManager()
     : host(nullptr),
@@ -49,8 +48,7 @@ bool NetworkManager::Initialize() {
         WSACleanup();
         return false;
     }
-    // NOTE: do NOT call std::srand(std::time(nullptr)) here. Player IDs are not random;
-    // they are assigned monotonically by the host. This is one of the bug fixes.
+ 
     atexit(enet_deinitialize);
     return true;
 }
@@ -61,7 +59,6 @@ void NetworkManager::Shutdown() {
 }
 
 uint32_t NetworkManager::AllocatePlayerID() {
-    // Host is always 0. Clients get 1, 2, 3, ... and IDs are NEVER reused within a session.
     uint32_t id = nextPlayerID++;
     return id;
 }
@@ -118,7 +115,6 @@ bool NetworkManager::HostRoom(int port) {
     address.host = ENET_HOST_ANY;
     address.port = port;
 
-    // Up to 15 clients, 2 channels, 0 incoming/outgoing bandwidth
     host = enet_host_create(&address, 15, 2, 0, 0);
     if (host == nullptr) {
         std::cerr << "An error occurred while trying to create an ENet server host." << std::endl;
@@ -127,9 +123,8 @@ bool NetworkManager::HostRoom(int port) {
 
     isHost = true;
     isConnected = true;
-    localPlayerID = 0; // Host is always 0
+    localPlayerID = 0; 
 
-    // Add host to player list immediately with the authoritative ID (0).
     UpsertPlayer(0, localUsername, localSkinIndex);
 
     std::cout << "Hosting room on port " << port << std::endl;
@@ -137,7 +132,6 @@ bool NetworkManager::HostRoom(int port) {
 }
 
 bool NetworkManager::JoinRoom(const std::string& ipAddress, int port) {
-    // Create a client host
     host = enet_host_create(nullptr, 1, 2, 0, 0);
     if (host == nullptr) {
         std::cerr << "An error occurred while trying to create an ENet client host." << std::endl;
@@ -156,20 +150,15 @@ bool NetworkManager::JoinRoom(const std::string& ipAddress, int port) {
         return false;
     }
 
-    // Wait up to 5 seconds for the connection attempt to succeed
     ENetEvent event;
     if (enet_host_service(host, &event, 5000) > 0 && event.type == ENET_EVENT_TYPE_CONNECT) {
         std::cout << "Connection to " << ipAddress << ":" << port << " succeeded." << std::endl;
         isHost = false;
         isConnected = true;
-        // localPlayerID will be set when we receive the ID_ASSIGNMENT packet from the host.
-        // We MUST NOT generate one ourselves.
         waitingForAssignment = true;
-        localPlayerID = 0; // Still 0 (unassigned) until host grants us an ID
+        localPlayerID = 0; 
 
-        // The players list on the client is empty until the host tells us who exists.
-        // The host will send ID_ASSIGNMENT (to us) followed by PLAYER_CONNECT (for everyone,
-        // including us). Until then, we have no players and no local ID.
+        
         return true;
     } else {
         enet_peer_reset(serverPeer);
@@ -231,29 +220,13 @@ void NetworkManager::Update() {
                           << event.peer->address.host << ":"
                           << event.peer->address.port << std::endl;
                 if (isHost) {
-                    // HOST side: a new client just connected. We must:
-                    //  1. Assign it a brand-new authoritative playerID (monotonic, never reused).
-                    //  2. Register the mapping: incomingPeerID -> playerID.
-                    //  3. Send ID_ASSIGNMENT to the new client only.
-                    //  4. Send the new client the full list of existing players (PLAYER_CONNECT
-                    //     for each), so it can build its player list.
-                    //  5. Broadcast a PLAYER_CONNECT for the new client to everyone else, so
-                    //     they add it to their lists.
-                    //
-                    // We do NOT use event.peer->incomingPeerID as the playerID — it's a
-                    // transport-layer slot index that ENet can reuse. PlayerIDs are
-                    // monotonic and never reused.
+          
 
                     uint16_t incomingPeerID = event.peer->incomingPeerID;
                     uint32_t newPlayerID = AllocatePlayerID();
                     RegisterPeerMapping(incomingPeerID, newPlayerID);
-
-                    // Add the new player to the host's player list immediately.
-                    // Username/skin is "Unknown" until the client announces itself; the client
-                    // will send a PLAYER_CONNECT with its info, and the host will update.
                     UpsertPlayer(newPlayerID, "Unknown", 1);
 
-                    // Step 3: Send ID_ASSIGNMENT to the new client only.
                     PacketIDAssignment idPkt{};
                     idPkt.header.type = PacketType::ID_ASSIGNMENT;
                     idPkt.header.playerID = 0; // From host
@@ -261,10 +234,7 @@ void NetworkManager::Update() {
                     ENetPacket* idPktPtr = enet_packet_create(&idPkt, sizeof(idPkt), ENET_PACKET_FLAG_RELIABLE);
                     enet_peer_send(event.peer, 0, idPktPtr);
 
-                    // Step 4: Send PLAYER_CONNECT for every existing player to the new client,
-                    // so it can build its own list. We use each player's authoritative playerID
-                    // in the header. The new client is NOT in this list (it doesn't know about
-                    // itself yet); it will be added in step 5.
+                    
                     for (const auto& existingPlayer : players) {
                         if (existingPlayer.peerID == newPlayerID) continue; // skip self
                         PacketPlayerConnect connectPacket{};

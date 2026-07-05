@@ -16,11 +16,14 @@ static inline float fclamp(float val, float lo, float hi) {
 static float netSendTimer = 0.0f;
 static const float NET_SEND_RATE = 1.0f / 30.0f; // Send 30 updates per second
 
-GameplayScreen::GameplayScreen(GameMode mode) : currentMode(mode), spawnTimer(0.0f), netSendTimer(0.0f) {
+GameplayScreen::GameplayScreen(GameMode mode) : currentMode(mode), spawnTimer(0.0f), netSendTimer(0.0f), worldTime(0.0f) {
     std::string bgPath = "assets/Free 2D Animated Vector Game Character Sprites/Free 2D Animated Vector Game Character Sprites/Environment/";
-    bgTex1 = TextureManager::GetTexture(bgPath + "ground_white.png");
-    bgTex2 = TextureManager::GetTexture(bgPath + "ground2_white.png");
-    rockTex = TextureManager::GetTexture(bgPath + "rock3.png");
+    bgTex1   = TextureManager::GetTexture(bgPath + "ground_white.png");
+    bgTex2   = TextureManager::GetTexture(bgPath + "ground2_white.png");
+    bgDetail = TextureManager::GetTexture(bgPath + "ground3_white.png");
+    rockTex  = TextureManager::GetTexture(bgPath + "rock3.png");
+    rockTex1 = TextureManager::GetTexture(bgPath + "rock1.png");
+    rockTex2 = TextureManager::GetTexture(bgPath + "rock2.png");
 
     // Player starts near center of world, using selected skin
     {
@@ -36,33 +39,79 @@ GameplayScreen::GameplayScreen(GameMode mode) : currentMode(mode), spawnTimer(0.
 
     if (currentMode == GameMode::OFFLINE) {
         std::string charPath = "assets/Free 2D Animated Vector Game Character Sprites/Free 2D Animated Vector Game Character Sprites/Full body animated characters/";
-        offlineBots.push_back(new BotEnemy({WORLD_WIDTH / 2.0f - 300.0f, WORLD_HEIGHT / 2.0f}, charPath + "Char 2/with hands/"));
-        offlineBots.push_back(new BotEnemy({WORLD_WIDTH / 2.0f + 300.0f, WORLD_HEIGHT / 2.0f}, charPath + "Char 3/with hands/"));
-        offlineBots.push_back(new BotEnemy({WORLD_WIDTH / 2.0f, WORLD_HEIGHT / 2.0f + 300.0f}, charPath + "Char 4/with hands/"));
-        offlineBots.push_back(new BotEnemy({WORLD_WIDTH / 2.0f, WORLD_HEIGHT / 2.0f - 300.0f}, charPath + "Char 5/with hands/"));
+        
+        Vector2 spawnPoints[] = {
+            { 300.0f, 300.0f },
+            { 1800.0f, 300.0f },
+            { 3500.0f, 300.0f },
+            { 300.0f, 1000.0f },
+            { 1800.0f, 1000.0f },
+            { 3500.0f, 1000.0f },
+            { 300.0f, 1700.0f },
+            { 1800.0f, 1700.0f },
+            { 3500.0f, 1700.0f }
+        };
+        int numSpawns = sizeof(spawnPoints) / sizeof(spawnPoints[0]);
+
+        for (int i = 0; i < numSpawns; i++) {
+            int r = GetRandomValue(0, numSpawns - 1);
+            Vector2 temp = spawnPoints[i];
+            spawnPoints[i] = spawnPoints[r];
+            spawnPoints[r] = temp;
+        }
+
+        // Spawn 4 Character Bots
+        BotEnemy* b0 = new BotEnemy(spawnPoints[0], charPath + "Char 1/with hands/"); b0->SetName("Alpha Bot"); offlineBots.push_back(b0);
+        BotEnemy* b1 = new BotEnemy(spawnPoints[1], charPath + "Char 2/with hands/"); b1->SetName("Bravo Bot"); offlineBots.push_back(b1);
+        BotEnemy* b2 = new BotEnemy(spawnPoints[2], charPath + "Char 3/with hands/"); b2->SetName("Charlie Bot"); offlineBots.push_back(b2);
+        BotEnemy* b3 = new BotEnemy(spawnPoints[3], charPath + "Char 4/with hands/"); b3->SetName("Delta Bot"); offlineBots.push_back(b3);
+
+        // Spawn 4 Monster Enemies
+        BotEnemy* m0 = new BotEnemy(spawnPoints[4], charPath + "Enemies/Enemy 1/"); m0->SetName("Ghoul"); offlineBots.push_back(m0);
+        BotEnemy* m1 = new BotEnemy(spawnPoints[5], charPath + "Enemies/Enemy 2/"); m1->SetName("Zombie"); offlineBots.push_back(m1);
+        BotEnemy* m2 = new BotEnemy(spawnPoints[6], charPath + "Enemies/Enemy 3/"); m2->SetName("Wraith"); offlineBots.push_back(m2);
+        BotEnemy* m3 = new BotEnemy(spawnPoints[7], charPath + "Enemies/Enemy 4/"); m3->SetName("Demon"); offlineBots.push_back(m3);
+
+        // Set player name and starting position to a unique spawnpoint
+        player->SetName(NetworkManager::GetInstance().localUsername.empty() ? "You" : NetworkManager::GetInstance().localUsername);
+        player->SetPosition(spawnPoints[8]);
     }
 
     // No AI companions in Online PvP mode
     // No AI companions needed - it's PvP!
 
-    // Scatter rocks around the world
+    // Scatter rocks around the world with variety
     rocks = {
-        {{400.0f,  500.0f},  0.5f, 80.0f,  0.0f},
-        {{900.0f,  900.0f},  0.7f, 110.0f, 0.0f},
-        {{1600.0f, 400.0f},  0.4f, 65.0f,  0.0f},
-        {{2200.0f, 1100.0f}, 0.6f, 95.0f,  0.0f},
-        {{2800.0f, 700.0f},  0.5f, 80.0f,  0.0f},
-        {{3400.0f, 1500.0f}, 0.7f, 110.0f, 0.0f},
-        {{1100.0f, 1600.0f}, 0.4f, 65.0f,  0.0f},
-        {{2600.0f, 350.0f},  0.5f, 80.0f,  0.0f},
-        {{700.0f,  1400.0f}, 0.6f, 95.0f,  0.0f},
-        {{3000.0f, 1700.0f}, 0.4f, 65.0f,  0.0f},
+        // Rock type 3 (large angular - center areas)
+        {{400.0f,   500.0f},  0.55f, 90.0f,  0.0f},
+        {{900.0f,   900.0f},  0.75f, 120.0f, 0.0f},
+        {{1600.0f,  400.0f},  0.45f, 70.0f,  0.0f},
+        {{2200.0f,  1100.0f}, 0.65f, 105.0f, 0.0f},
+        {{2800.0f,  700.0f},  0.50f, 80.0f,  0.0f},
+        {{3400.0f,  1500.0f}, 0.70f, 112.0f, 0.0f},
+        {{1100.0f,  1600.0f}, 0.45f, 72.0f,  0.0f},
+        {{2600.0f,  350.0f},  0.55f, 88.0f,  0.0f},
+        {{700.0f,   1400.0f}, 0.60f, 96.0f,  0.0f},
+        {{3000.0f,  1700.0f}, 0.40f, 64.0f,  0.0f},
+        // Extra coverage across large map
+        {{500.0f,  1200.0f},  0.50f, 80.0f,  0.0f},
+        {{1400.0f,  700.0f},  0.45f, 72.0f,  0.0f},
+        {{3200.0f,  500.0f},  0.60f, 95.0f,  0.0f},
+        {{1900.0f, 1800.0f},  0.55f, 88.0f,  0.0f},
+        {{2400.0f, 1400.0f},  0.40f, 64.0f,  0.0f},
+        {{150.0f,   750.0f},  0.50f, 80.0f,  0.0f},
+        {{3700.0f, 1100.0f},  0.65f, 104.0f, 0.0f},
+        {{1300.0f, 1200.0f},  0.45f, 72.0f,  0.0f},
+        {{3100.0f, 1200.0f},  0.55f, 88.0f,  0.0f},
+        {{2000.0f,  600.0f},  0.40f, 64.0f,  0.0f},
     };
     // Set platformTop: approximate top Y of each rock so characters can stand on it
     for (auto& r : rocks) {
         // rock texture center is at position; top surface is about radius above center
         r.platformTop = r.position.y - r.radius * 0.8f;
     }
+
+    if (currentMode == GameMode::OFFLINE) HideCursor();
 
     // Camera2D
     camera.target   = player->GetPosition();
@@ -76,6 +125,7 @@ GameplayScreen::~GameplayScreen() {
     if (player2) delete player2;
     for (auto b : offlineBots) delete b;
     for (auto r : remotePlayers) delete r;
+    if (currentMode == GameMode::OFFLINE) ShowCursor();
 }
 
 Character* GameplayScreen::GetNearestEnemy(Vector2 pos) {
@@ -218,9 +268,9 @@ void GameplayScreen::CheckCollisions() {
                 dmgPkt.header.type    = PacketType::PLAYER_DAMAGE;
                 dmgPkt.header.playerID = NetworkManager::GetInstance().GetLocalPlayerID();
                 dmgPkt.targetPlayerID = t->peerID;
-                dmgPkt.damageAmount   = 25.0f;
+                dmgPkt.damageAmount   = playerProjs[i]->GetDamage();
                 NetworkManager::GetInstance().SendPacket(&dmgPkt, sizeof(dmgPkt), true);
-                t->TakeDamage(25.0f);
+                t->TakeDamage(playerProjs[i]->GetDamage());
                 playerProjs[i]->Deactivate();
                 break;
             }
@@ -232,22 +282,88 @@ void GameplayScreen::CheckCollisions() {
             if (b->IsDead()) continue;
             Vector2 cc = { b->GetPosition().x, b->GetPosition().y - b->GetJumpHeight() };
             if (ProjectileHitsAABB(projPos, cc)) {
-                b->TakeDamage(25.0f);
+                bool wasDead = b->IsDead();
+                b->TakeDamage(playerProjs[i]->GetDamage());
                 playerProjs[i]->Deactivate();
+                if (!wasDead && b->IsDead()) {
+                    player->AddKill();
+                    b->AddDeath();
+                }
                 break;
             }
         }
     }
 
-    // Offline bot projectiles hitting player
-    Vector2 playerCC = { player->GetPosition().x, player->GetPosition().y - player->GetJumpHeight() };
+    // Offline bot projectiles hitting player or other bots (Free For All)
     for (auto b : offlineBots) {
-        for (auto& p : b->GetProjectiles()) {
-            if (!p->IsActive()) continue;
+        if (b->IsMonster()) {
+            // Monster melee: if within contact range of target, deal damage on cooldown
+            Character* nearestTarget = nullptr;
+            float minDist = 50.0f; // melee contact range
+
             if (!player->IsDead()) {
-                if (ProjectileHitsAABB(p->GetPosition(), playerCC)) {
-                    player->TakeDamage(10.0f);
-                    p->Deactivate();
+                float dx = player->GetPosition().x - b->GetPosition().x;
+                float dy = player->GetPosition().y - b->GetPosition().y;
+                float d = sqrtf(dx*dx + dy*dy);
+                if (d < minDist) { minDist = d; nearestTarget = player; }
+            }
+            for (auto other : offlineBots) {
+                if (other == b || other->IsDead()) continue;
+                
+                // Monsters don't attack other monsters
+                if (other->IsMonster()) continue;
+
+                float dx = other->GetPosition().x - b->GetPosition().x;
+                float dy = other->GetPosition().y - b->GetPosition().y;
+                float d = sqrtf(dx*dx + dy*dy);
+                if (d < minDist) { minDist = d; nearestTarget = other; }
+            }
+
+            if (nearestTarget && b->GetShootCooldown() <= 0.0f) {
+                bool wasDead = nearestTarget->IsDead();
+                nearestTarget->TakeDamage(10.0f); // Nerfed monster damage from 20.0 to 10.0
+                b->SetShootCooldown(0.8f); // melee attack rate
+                if (!wasDead && nearestTarget->IsDead()) {
+                    b->AddKill();
+                    nearestTarget->AddDeath();
+                    if (nearestTarget == player) player->AddDeath();
+                }
+            }
+        } else {
+            // Ranged bot projectiles
+            for (auto& p : b->GetProjectiles()) {
+                if (!p->IsActive()) continue;
+
+                bool hit = false;
+                if (!player->IsDead()) {
+                    Vector2 playerCC = { player->GetPosition().x, player->GetPosition().y - player->GetJumpHeight() };
+                    if (ProjectileHitsAABB(p->GetPosition(), playerCC)) {
+                        bool wasAlive = !player->IsDead();
+                        player->TakeDamage(p->GetDamage());
+                        p->Deactivate();
+                        hit = true;
+                        if (wasAlive && player->IsDead()) {
+                            b->AddKill();
+                            player->AddDeath();
+                        }
+                    }
+                }
+
+                if (hit) continue;
+
+                for (auto other : offlineBots) {
+                    if (other == b || other->IsDead()) continue;
+                    Vector2 otherCC = { other->GetPosition().x, other->GetPosition().y - other->GetJumpHeight() };
+                    if (ProjectileHitsAABB(p->GetPosition(), otherCC)) {
+                        bool wasAlive = !other->IsDead();
+                        other->TakeDamage(p->GetDamage());
+                        p->Deactivate();
+                        if (wasAlive && other->IsDead()) {
+                            b->AddKill();
+                            other->AddDeath();
+                        }
+                        break;
+                    }
                 }
             }
         }
@@ -255,6 +371,8 @@ void GameplayScreen::CheckCollisions() {
 }
 
 bool GameplayScreen::Update(float deltaTime) {
+    worldTime += deltaTime;
+
     if (IsKeyPressed(KEY_ESCAPE)) {
         return false;
     }
@@ -287,8 +405,29 @@ bool GameplayScreen::Update(float deltaTime) {
     // Update bots in offline mode
     if (currentMode == GameMode::OFFLINE) {
         for (auto b : offlineBots) {
-            b->UpdateAI(deltaTime, player->GetPosition());
+            Character* target = GetNearestTargetForBot(b);
+            if (target) {
+                b->UpdateAI(deltaTime, target->GetPosition());
+            } else {
+                b->UpdateAI(deltaTime, b->GetPosition());
+            }
+            b->Update(deltaTime);
             ResolveRockCollisions(b);
+
+            if (b->ShouldRespawn()) {
+                Vector2 spawnPos = GetFarSpawnPoint();
+                b->ResetHealth(100.0f);
+                b->GetProjectiles().clear();
+                b->SetPosition(spawnPos);
+                b->ResetDeathTimer();
+            }
+        }
+
+        // Offline Player Respawn logic
+        if (player->IsDead() && IsKeyPressed(KEY_R)) {
+            player->ResetHealth(100.0f);
+            Vector2 spawnPos = GetFarSpawnPoint();
+            player->SetPosition(spawnPos);
         }
     }
 
@@ -372,32 +511,167 @@ bool GameplayScreen::Update(float deltaTime) {
 
 void GameplayScreen::Draw(RenderTexture2D target) {
     BeginTextureMode(target);
-    ClearBackground({30, 30, 50, 255});
+    // Sky: vertical gradient from deep space blue at top to dark midnight at bottom
+    ClearBackground({15, 15, 35, 255});
+    // Draw sky gradient strips (above world, in screen space before Mode2D)
+    // We'll do this in world space during BeginMode2D
 
     BeginMode2D(camera);
 
-    // Draw tiled floor over the entire world
+    // ---- LAYER 0: Deep background fill + sky gradient strips ----
+    // Draw a subtle vertical sky gradient across the whole world
+    for (int strip = 0; strip < WORLD_HEIGHT; strip += 80) {
+        float t = (float)strip / (float)WORLD_HEIGHT;
+        unsigned char r = (unsigned char)(15 + t * 10);
+        unsigned char g = (unsigned char)(15 + t * 8);
+        unsigned char b = (unsigned char)(35 + t * 15);
+        DrawRectangle(0, strip, WORLD_WIDTH, 80, {r, g, b, 255});
+    }
+
+    // ---- LAYER 1: Tiled base ground (warm olive-green tint) ----
     if (bgTex1.id != 0 && bgTex1.width > 0) {
         int cols = (int)(WORLD_WIDTH  / bgTex1.width)  + 2;
         int rows = (int)(WORLD_HEIGHT / bgTex1.height) + 2;
+        // Warm mossy green tint for ground
+        Color groundTint = {72, 88, 55, 255};
         for (int y = 0; y < rows; ++y) {
             for (int x = 0; x < cols; ++x) {
-                DrawTexture(bgTex1, x * bgTex1.width, y * bgTex1.height, {90, 90, 110, 255});
+                DrawTexture(bgTex1, x * bgTex1.width, y * bgTex1.height, groundTint);
             }
         }
     }
 
-    // Draw rocks
-    if (rockTex.id != 0) {
-        for (const auto& r : rocks) {
-            // Center the texture on rock position
-            float w = rockTex.width  * r.scale;
-            float h = rockTex.height * r.scale;
-            Vector2 origin = {w / 2.0f, h / 2.0f};
-            Rectangle src = {0, 0, (float)rockTex.width, (float)rockTex.height};
-            Rectangle dst = {r.position.x, r.position.y, w, h};
-            DrawTexturePro(rockTex, src, dst, origin, 0.0f, WHITE);
+    // ---- LAYER 2: Pebble/detail overlay (slightly darker, partial opacity) ----
+    if (bgTex2.id != 0 && bgTex2.width > 0) {
+        int cols = (int)(WORLD_WIDTH  / bgTex2.width)  + 2;
+        int rows = (int)(WORLD_HEIGHT / bgTex2.height) + 2;
+        Color detailTint = {55, 70, 40, 120};
+        for (int y = 0; y < rows; ++y) {
+            for (int x = 0; x < cols; ++x) {
+                DrawTexture(bgTex2, x * bgTex2.width, y * bgTex2.height, detailTint);
+            }
         }
+    }
+
+    // ---- LAYER 3: Zone border highlights ----
+    // Outer danger border glow (red zone edges)
+    int borderW = 80;
+    Color borderDanger = {180, 30, 30, 60};
+    DrawRectangle(0, 0, WORLD_WIDTH, borderW, borderDanger);                       // top
+    DrawRectangle(0, WORLD_HEIGHT - borderW, WORLD_WIDTH, borderW, borderDanger); // bottom
+    DrawRectangle(0, 0, borderW, WORLD_HEIGHT, borderDanger);                     // left
+    DrawRectangle(WORLD_WIDTH - borderW, 0, borderW, WORLD_HEIGHT, borderDanger); // right
+    // Inner border line (bright orange-red outline)
+    Color borderLine = {220, 80, 30, 100};
+    int lineThk = 4;
+    DrawRectangle(borderW, borderW, WORLD_WIDTH - borderW*2, lineThk, borderLine);
+    DrawRectangle(borderW, WORLD_HEIGHT - borderW - lineThk, WORLD_WIDTH - borderW*2, lineThk, borderLine);
+    DrawRectangle(borderW, borderW, lineThk, WORLD_HEIGHT - borderW*2, borderLine);
+    DrawRectangle(WORLD_WIDTH - borderW - lineThk, borderW, lineThk, WORLD_HEIGHT - borderW*2, borderLine);
+
+    // ---- LAYER 4: Animated ambient glow pools on ground ----
+    struct GlowPool { float x, y, radius; Color col; };
+    GlowPool glowPools[] = {
+        { WORLD_WIDTH  * 0.5f,  WORLD_HEIGHT * 0.5f,  260.0f, {80,  200, 120,  0} }, // center green
+        { WORLD_WIDTH  * 0.15f, WORLD_HEIGHT * 0.2f,  160.0f, {60,  100, 200,  0} }, // top-left blue
+        { WORLD_WIDTH  * 0.85f, WORLD_HEIGHT * 0.2f,  160.0f, {200, 80,  60,   0} }, // top-right red
+        { WORLD_WIDTH  * 0.15f, WORLD_HEIGHT * 0.8f,  160.0f, {200, 170, 40,   0} }, // bot-left gold
+        { WORLD_WIDTH  * 0.85f, WORLD_HEIGHT * 0.8f,  160.0f, {120, 60,  200,  0} }, // bot-right purple
+        { WORLD_WIDTH  * 0.5f,  WORLD_HEIGHT * 0.2f,  130.0f, {40,  180, 200,  0} }, // top-center cyan
+        { WORLD_WIDTH  * 0.5f,  WORLD_HEIGHT * 0.8f,  130.0f, {200, 100, 160,  0} }, // bot-center pink
+    };
+    float pulse = 0.5f + 0.5f * sinf(worldTime * 1.2f);
+    for (auto& gp : glowPools) {
+        unsigned char alpha = (unsigned char)(25 + pulse * 30);
+        Color c = { gp.col.r, gp.col.g, gp.col.b, alpha };
+        // Outer glow (large, very transparent)
+        DrawCircle((int)gp.x, (int)gp.y, gp.radius * 1.8f, { c.r, c.g, c.b, (unsigned char)(alpha / 3) });
+        // Inner glow (smaller, more opaque)
+        DrawCircle((int)gp.x, (int)gp.y, gp.radius, c);
+        // Core bright center
+        DrawCircle((int)gp.x, (int)gp.y, gp.radius * 0.3f, { c.r, c.g, c.b, (unsigned char)(alpha * 2 < 255 ? alpha * 2 : 255) });
+    }
+
+    // ---- LAYER 5: Ground patch accents (darker moss patches) ----
+    if (bgDetail.id != 0) {
+        struct Patch { float x, y, sc; Color col; };
+        Patch patches[] = {
+            { 600.0f,  800.0f,  2.5f, {50,  75,  35,  120} },
+            { 1800.0f, 500.0f,  2.0f, {60,  90,  40,  100} },
+            { 2500.0f, 1300.0f, 3.0f, {45,  65,  30,  110} },
+            { 3200.0f, 900.0f,  2.2f, {55,  80,  38,  100} },
+            { 1200.0f, 1700.0f, 2.8f, {50,  72,  33,  110} },
+            { 800.0f,  300.0f,  1.8f, {65,  95,  45,  90}  },
+            { 3600.0f, 400.0f,  2.0f, {48,  68,  32,  100} },
+            { 400.0f,  1700.0f, 2.3f, {55,  78,  36,  105} },
+        };
+        for (auto& p : patches) {
+            float w = bgDetail.width  * p.sc;
+            float h = bgDetail.height * p.sc;
+            Vector2 orig = { w / 2.0f, h / 2.0f };
+            Rectangle src = { 0, 0, (float)bgDetail.width, (float)bgDetail.height };
+            Rectangle dst = { p.x, p.y, w, h };
+            DrawTexturePro(bgDetail, src, dst, orig, 0.0f, p.col);
+        }
+    }
+
+    // ---- LAYER 6: Rock shadows (drawn before rocks) ----
+    struct RockDraw {
+        Vector2 pos;
+        float scale;
+        int type; // 0=rock3, 1=rock1, 2=rock2
+        float rotation;
+        Color tint;
+    };
+    // 20 rocks: first 10 use rockTex (rock3), next 5 rock1, next 5 rock2
+    RockDraw rockDrawList[] = {
+        // rock3 (angular cracked boulders) - tinted warm grey/brown
+        { {400.0f,   500.0f},  0.55f, 0, -5.0f,   {200, 190, 175, 255} },
+        { {900.0f,   900.0f},  0.75f, 0,  8.0f,   {185, 175, 160, 255} },
+        { {1600.0f,  400.0f},  0.45f, 0, -12.0f,  {210, 195, 180, 255} },
+        { {2200.0f,  1100.0f}, 0.65f, 0,  6.0f,   {195, 185, 168, 255} },
+        { {2800.0f,  700.0f},  0.50f, 0, -8.0f,   {200, 188, 172, 255} },
+        { {3400.0f,  1500.0f}, 0.70f, 0,  10.0f,  {190, 180, 165, 255} },
+        { {1100.0f,  1600.0f}, 0.45f, 0, -15.0f,  {205, 192, 178, 255} },
+        { {2600.0f,  350.0f},  0.55f, 0,  4.0f,   {195, 183, 168, 255} },
+        { {700.0f,   1400.0f}, 0.60f, 0, -7.0f,   {200, 188, 172, 255} },
+        { {3000.0f,  1700.0f}, 0.40f, 0,  12.0f,  {208, 196, 180, 255} },
+        // rock1 (flat cracked slabs) - slightly cool blue-grey
+        { {500.0f,  1200.0f},  0.50f, 1, -18.0f,  {175, 185, 195, 255} },
+        { {1400.0f,  700.0f},  0.45f, 1,  14.0f,  {170, 180, 190, 255} },
+        { {3200.0f,  500.0f},  0.60f, 1, -10.0f,  {180, 188, 200, 255} },
+        { {1900.0f, 1800.0f},  0.55f, 1,  20.0f,  {172, 182, 192, 255} },
+        { {2400.0f, 1400.0f},  0.40f, 1, -22.0f,  {178, 186, 198, 255} },
+        // rock2 (rounded boulders) - warm earthy tan
+        { {150.0f,   750.0f},  0.50f, 2,  5.0f,   {210, 200, 175, 255} },
+        { {3700.0f, 1100.0f},  0.65f, 2, -9.0f,   {205, 195, 170, 255} },
+        { {1300.0f, 1200.0f},  0.45f, 2,  16.0f,  {215, 205, 180, 255} },
+        { {3100.0f, 1200.0f},  0.55f, 2, -14.0f,  {208, 198, 173, 255} },
+        { {2000.0f,  600.0f},  0.40f, 2,  7.0f,   {212, 202, 178, 255} },
+    };
+
+    // Draw rock shadows first
+    for (auto& rd : rockDrawList) {
+        Texture2D tex = (rd.type == 1) ? rockTex1 : (rd.type == 2) ? rockTex2 : rockTex;
+        if (tex.id == 0) continue;
+        float w = tex.width  * rd.scale * 1.1f;
+        float h = tex.height * rd.scale * 0.4f;
+        Vector2 orig = { w / 2.0f, 0.0f };
+        Rectangle src = { 0, 0, (float)tex.width, (float)tex.height };
+        Rectangle dst = { rd.pos.x + 12, rd.pos.y + 18, w, h };
+        DrawTexturePro(tex, src, dst, orig, rd.rotation * 0.5f, {0, 0, 0, 50});
+    }
+
+    // Draw rocks with tints and rotations
+    for (auto& rd : rockDrawList) {
+        Texture2D tex = (rd.type == 1) ? rockTex1 : (rd.type == 2) ? rockTex2 : rockTex;
+        if (tex.id == 0) continue;
+        float w = tex.width  * rd.scale;
+        float h = tex.height * rd.scale;
+        Vector2 orig = { w / 2.0f, h / 2.0f };
+        Rectangle src = { 0, 0, (float)tex.width, (float)tex.height };
+        Rectangle dst = { rd.pos.x, rd.pos.y, w, h };
+        DrawTexturePro(tex, src, dst, orig, rd.rotation, rd.tint);
     }
 
     // Depth-sort all characters by Y position
@@ -427,7 +701,30 @@ void GameplayScreen::Draw(RenderTexture2D target) {
         DrawText("WASD: Move | SPACE: Jump | LMB: Shoot | 1/2/3: Change Gun", 14, 14, 16, {200, 200, 200, 200});
         DrawText(TextFormat("Opponents Online: %d", (int)remotePlayers.size()), 14, 58, 14, {255, 200, 100, 220});
     } else {
-        DrawText("WASD: Move | SPACE: Jump | Left Click: Shoot", 14, 14, 16, {200, 200, 200, 200});
+        DrawText("WASD: Move | SPACE: Jump | Left Click: Shoot | [LSHIFT]: Dash | [E]: Shield", 14, 14, 16, {200, 200, 200, 200});
+        
+        // Cooldowns HUD
+        float dCD = player->GetDashCooldown();
+        float sCD = player->GetShieldCooldown();
+        if (dCD > 0.0f) {
+            DrawText(TextFormat("DASH: Cooldown (%.1fs)", dCD), 14, 60, 14, RED);
+        } else {
+            DrawText("DASH: READY [LSHIFT]", 14, 60, 14, GREEN);
+        }
+        if (sCD > 0.0f) {
+            DrawText(TextFormat("SHIELD: Cooldown (%.1fs)", sCD), 14, 76, 14, RED);
+        } else {
+            DrawText("SHIELD: READY [E]", 14, 76, 14, BLUE);
+        }
+
+        // Ammo HUD
+        int cAmmo = player->GetAmmo();
+        int mAmmo = player->GetMaxAmmo();
+        if (player->IsReloading()) {
+            DrawText("AMMO: RELOADING...", 14, 92, 14, GOLD);
+        } else {
+            DrawText(TextFormat("AMMO: %d / %d  [R to Reload]", cAmmo, mAmmo), 14, 92, 14, RAYWHITE);
+        }
     }
 
     // Health bar
@@ -439,22 +736,83 @@ void GameplayScreen::Draw(RenderTexture2D target) {
 
     if (player->IsDead() && (!player2 || player2->IsDead())) {
         DrawText("GAME OVER", VIRTUAL_WIDTH/2 - 120, VIRTUAL_HEIGHT/2 - 20, 48, RED);
+        DrawText("Press R to Respawn", VIRTUAL_WIDTH/2 - 90, VIRTUAL_HEIGHT/2 + 40, 20, RAYWHITE);
+    }
+
+    // Scoreboard / Leaderboard
+    if (IsKeyDown(KEY_TAB)) {
         if (currentMode == GameMode::ONLINE) {
-            DrawText("Press R to Respawn", VIRTUAL_WIDTH/2 - 90, VIRTUAL_HEIGHT/2 + 40, 20, RAYWHITE);
+            DrawRectangle(VIRTUAL_WIDTH/2 - 200, 100, 400, 300, {0, 0, 0, 200});
+            DrawText("SCOREBOARD", VIRTUAL_WIDTH/2 - MeasureText("SCOREBOARD", 20)/2, 110, 20, WHITE);
+            int y = 150;
+            DrawText(TextFormat("%s : %d Kills / %d Deaths", NetworkManager::GetInstance().localUsername.c_str(), NetworkManager::GetInstance().localKills, NetworkManager::GetInstance().localDeaths), VIRTUAL_WIDTH/2 - 180, y, 16, GREEN);
+            y += 25;
+            for (auto rp : remotePlayers) {
+                DrawText(TextFormat("%s : %d Kills / %d Deaths", rp->username.c_str(), rp->kills, rp->deaths), VIRTUAL_WIDTH/2 - 180, y, 16, RAYWHITE);
+                y += 25;
+            }
+        } else if (currentMode == GameMode::OFFLINE) {
+            // --- Offline Leaderboard ---
+            // Build sorted list: player + bots
+            struct LBEntry { std::string name; int kills; int deaths; bool isPlayer; bool isMonster; };
+            std::vector<LBEntry> board;
+            board.push_back({ player->GetName().empty() ? "You" : player->GetName(), player->GetKills(), player->GetDeaths(), true, false });
+            for (auto b : offlineBots) {
+                board.push_back({ b->GetName().empty() ? "Bot" : b->GetName(), b->GetKills(), b->GetDeaths(), false, b->IsMonster() });
+            }
+            // Sort by kills descending
+            for (int i = 0; i < (int)board.size(); i++) {
+                for (int j = i+1; j < (int)board.size(); j++) {
+                    if (board[j].kills > board[i].kills) std::swap(board[i], board[j]);
+                }
+            }
+
+            int boardW = 500;
+            int boardH = 40 + (int)board.size() * 26 + 20;
+            int boardX = VIRTUAL_WIDTH/2 - boardW/2;
+            int boardY = 80;
+            DrawRectangle(boardX, boardY, boardW, boardH, {10, 10, 30, 220});
+            DrawRectangleLines(boardX, boardY, boardW, boardH, {100, 150, 255, 200});
+            DrawText("LEADERBOARD [TAB]", boardX + boardW/2 - MeasureText("LEADERBOARD [TAB]", 18)/2, boardY + 8, 18, {255, 220, 60, 255});
+
+            int ey = boardY + 38;
+            for (int i = 0; i < (int)board.size(); i++) {
+                Color monsterColor = { 255, 100, 100, 255 };
+                Color entryColor = board[i].isPlayer ? GREEN : (board[i].isMonster ? monsterColor : RAYWHITE);
+                const char* medal = (i == 0) ? "#1 " : (i == 1) ? "#2 " : (i == 2) ? "#3 " : "   ";
+                const char* tag = board[i].isMonster ? " [MONSTER]" : (board[i].isPlayer ? " [YOU]" : " [BOT]");
+                DrawText(TextFormat("%s%s%s  K:%d  D:%d", medal, board[i].name.c_str(), tag, board[i].kills, board[i].deaths),
+                         boardX + 14, ey, 14, entryColor);
+                ey += 26;
+            }
         }
     }
 
-    // Scoreboard
-    if (currentMode == GameMode::ONLINE && IsKeyDown(KEY_TAB)) {
-        DrawRectangle(VIRTUAL_WIDTH/2 - 200, 100, 400, 300, {0, 0, 0, 200});
-        DrawText("SCOREBOARD", VIRTUAL_WIDTH/2 - MeasureText("SCOREBOARD", 20)/2, 110, 20, WHITE);
-        
-        int y = 150;
-        DrawText(TextFormat("%s : %d Kills / %d Deaths", NetworkManager::GetInstance().localUsername.c_str(), NetworkManager::GetInstance().localKills, NetworkManager::GetInstance().localDeaths), VIRTUAL_WIDTH/2 - 180, y, 16, GREEN);
-        y += 25;
-        for (auto rp : remotePlayers) {
-            DrawText(TextFormat("%s : %d Kills / %d Deaths", rp->username.c_str(), rp->kills, rp->deaths), VIRTUAL_WIDTH/2 - 180, y, 16, RAYWHITE);
-            y += 25;
+    // Crosshair (custom cursor) - draw at mouse position in screen space
+    {
+        Texture2D crosshairTex = TextureManager::GetTexture(
+            "assets/Free 2D Animated Vector Game Character Sprites/"
+            "Free 2D Animated Vector Game Character Sprites/Extras/crosshair.png");
+        if (crosshairTex.id != 0) {
+            Vector2 mousePos = GetMousePosition();
+            float scaleX2 = (float)VIRTUAL_WIDTH  / (float)GetScreenWidth();
+            float scaleY2 = (float)VIRTUAL_HEIGHT / (float)GetScreenHeight();
+            Vector2 mouseVirt = { mousePos.x * scaleX2, mousePos.y * scaleY2 };
+            float cScale = 0.5f;
+            float cW = crosshairTex.width  * cScale;
+            float cH = crosshairTex.height * cScale;
+            Rectangle cSrc = { 0, 0, (float)crosshairTex.width, (float)crosshairTex.height };
+            Rectangle cDst = { mouseVirt.x, mouseVirt.y, cW, cH };
+            Vector2 cOrigin = { cW / 2.0f, cH / 2.0f };
+            DrawTexturePro(crosshairTex, cSrc, cDst, cOrigin, 0.0f, WHITE);
+        } else {
+            // Fallback: draw a simple crosshair with lines
+            Vector2 mp = GetMousePosition();
+            float scaleX2 = (float)VIRTUAL_WIDTH  / (float)GetScreenWidth();
+            float scaleY2 = (float)VIRTUAL_HEIGHT / (float)GetScreenHeight();
+            Vector2 mv = { mp.x * scaleX2, mp.y * scaleY2 };
+            DrawLine((int)mv.x - 10, (int)mv.y, (int)mv.x + 10, (int)mv.y, WHITE);
+            DrawLine((int)mv.x, (int)mv.y - 10, (int)mv.x, (int)mv.y + 10, WHITE);
         }
     }
 
@@ -581,4 +939,81 @@ void GameplayScreen::PollNetworkEvents(float deltaTime) {
             RemoveRemotePlayer(pkt.header.playerID);
         }
     }
+}
+
+Vector2 GameplayScreen::GetFarSpawnPoint() {
+    Vector2 spawnPoints[] = {
+        { 300.0f, 300.0f },
+        { 1800.0f, 300.0f },
+        { 3500.0f, 300.0f },
+        { 300.0f, 1000.0f },
+        { 1800.0f, 1000.0f },
+        { 3500.0f, 1000.0f },
+        { 300.0f, 1700.0f },
+        { 1800.0f, 1700.0f },
+        { 3500.0f, 1700.0f }
+    };
+    int numSpawns = sizeof(spawnPoints) / sizeof(spawnPoints[0]);
+
+    std::vector<Character*> activeChars;
+    if (!player->IsDead()) activeChars.push_back(player);
+    for (auto b : offlineBots) {
+        if (!b->IsDead()) activeChars.push_back(b);
+    }
+
+    if (activeChars.empty()) {
+        return spawnPoints[GetRandomValue(0, numSpawns - 1)];
+    }
+
+    Vector2 bestSpawn = spawnPoints[0];
+    float maxMinDistSq = -1.0f;
+
+    for (int i = 0; i < numSpawns; i++) {
+        float minDistSq = 99999999.0f;
+        for (auto c : activeChars) {
+            float dx = c->GetPosition().x - spawnPoints[i].x;
+            float dy = c->GetPosition().y - spawnPoints[i].y;
+            float distSq = dx*dx + dy*dy;
+            if (distSq < minDistSq) {
+                minDistSq = distSq;
+            }
+        }
+        if (minDistSq > maxMinDistSq) {
+            maxMinDistSq = minDistSq;
+            bestSpawn = spawnPoints[i];
+        }
+    }
+    return bestSpawn;
+}
+
+Character* GameplayScreen::GetNearestTargetForBot(BotEnemy* b) {
+    Character* nearest = nullptr;
+    float minDist = 999999.0f;
+
+    // Check player
+    if (!player->IsDead()) {
+        float dx = player->GetPosition().x - b->GetPosition().x;
+        float dy = player->GetPosition().y - b->GetPosition().y;
+        float dist = dx*dx + dy*dy;
+        minDist = dist;
+        nearest = player;
+    }
+
+    // Check other bots
+    for (auto other : offlineBots) {
+        if (other == b || other->IsDead()) continue;
+        
+        // Monsters don't target other monsters!
+        if (b->IsMonster() && other->IsMonster()) continue;
+
+        float dx = other->GetPosition().x - b->GetPosition().x;
+        float dy = other->GetPosition().y - b->GetPosition().y;
+        float dist = dx*dx + dy*dy;
+        if (dist < minDist) {
+            minDist = dist;
+            nearest = other;
+        }
+    }
+
+    return nearest;
 }

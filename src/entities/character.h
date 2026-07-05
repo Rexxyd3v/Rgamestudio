@@ -38,9 +38,33 @@ public:
         if (animations.count(CharState::IDLE)) animations[CharState::IDLE]->Reset();
     }
     bool    IsDead() const { return health <= 0; }
+    bool    IsMonster() const { return isMonster; }
     bool    IsAnimationFinished() const;
     void    TakeDamage(float amount);
     float   GetHealth() const;
+
+    // Stats
+    std::string GetName() const { return name; }
+    void SetName(const std::string& n) { name = n; }
+    int GetKills() const { return kills; }
+    int GetDeaths() const { return deaths; }
+    void AddKill() { kills++; }
+    void AddDeath() { deaths++; }
+    float GetShootCooldown() const { return currentShootCooldown; }
+    void SetShootCooldown(float val) { currentShootCooldown = val; }
+
+    // Skills
+    float GetDashCooldown() const { return dashCooldown; }
+    float GetShieldCooldown() const { return shieldCooldown; }
+    bool ActivateDash(Vector2 direction);
+    bool ActivateShield();
+    void UpdateSkills(float deltaTime);
+
+    // Weapons and Reloading
+    int GetAmmo() const;
+    int GetMaxAmmo() const;
+    bool IsReloading() const;
+    void TriggerReload();
 
     // Platform / jump system
     float GetJumpHeight()    const { return jumpHeight; }
@@ -73,6 +97,19 @@ protected:
     int        faceDirection; // 1 = right, -1 = left
     CharState  currentState;
     bool       justShot;
+    bool       isMonster;
+    std::string name;
+    int        kills;
+    int        deaths;
+    float      muzzleFlashTimer;
+    float      dashTimer;
+    float      dashCooldown;
+    Vector2    dashDirection;
+    float      shieldTimer;
+    float      shieldCooldown;
+    int        ammo[3];
+    float      reloadTimer;
+    float      lastHitTimer;
     float      scale;
     float      health;
     float      speed;
