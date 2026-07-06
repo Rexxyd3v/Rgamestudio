@@ -2,16 +2,28 @@
 #include "../network/network_manager.h"
 #include "../constants.h"
 #include <iostream>
-#include <sstream>
+#include "raylib.h"
+
+namespace {
+bool TryJoinRoom(const std::string& address, bool& goToLobby) {
+    if (address.empty()) {
+        return false;
+    }
+    if (NetworkManager::GetInstance().JoinRoom(address)) {
+        goToLobby = true;
+        return true;
+    }
+    return false;
+}
+} // namespace
 
 OnlineMenuScreen::OnlineMenuScreen() :
     startGame(false),
+    goToLobby(false),
     activeInput(0),
-    ipAddress("127.0.0.1"),
+    joinAddress(""),
     username("Player"),
-    currentSkin(1),
-    roomCode(""),
-    isHosting(false) {
+    currentSkin(1) {
 }
 
 OnlineMenuScreen::~OnlineMenuScreen() {
@@ -27,16 +39,14 @@ bool OnlineMenuScreen::Update(float deltaTime) {
     }
 
     if (activeInput != 0) {
-        // Handle typing for username, IP, or room code
         std::string* activeStr = nullptr;
         if (activeInput == 1) activeStr = &username;
-        else if (activeInput == 2) activeStr = &ipAddress;
-        else if (activeInput == 3) activeStr = &roomCode;
+        else if (activeInput == 2) activeStr = &joinAddress;
 
         if (activeStr) {
             int key = GetCharPressed();
             while (key > 0) {
-                if ((key >= 32) && (key <= 125) && (activeStr->length() < 15)) {
+                if ((key >= 32) && (key <= 125) && (activeStr->length() < 64)) {
                     *activeStr += (char)key;
                 }
                 key = GetCharPressed();
@@ -46,47 +56,42 @@ bool OnlineMenuScreen::Update(float deltaTime) {
                 activeStr->pop_back();
             }
 
+            if ((IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL)) && IsKeyPressed(KEY_V)) {
+                const char* clipboardText = GetClipboardText();
+                if (clipboardText) {
+                    std::string clip(clipboardText);
+                    for (char c : clip) {
+                        if ((c >= 32) && (c <= 125) && (activeStr->length() < 64)) {
+                            *activeStr += c;
+                        }
+                    }
+                }
+            }
+
             if (IsKeyPressed(KEY_ENTER)) {
-                if (activeInput == 2 && ipAddress.length() > 0) {
-                    // We pressed enter on IP - attempt to join
+                if (activeInput == 2) {
                     NetworkManager::GetInstance().localUsername = username;
                     NetworkManager::GetInstance().localSkinIndex = currentSkin;
-                    if (NetworkManager::GetInstance().JoinRoom(ipAddress, 7777)) {
-                        // Go to lobby screen
-                        goToLobby = true;
+                    if (TryJoinRoom(joinAddress, goToLobby)) {
                         return false;
-                    } else {
-                        activeInput = 0; // Failed to join
                     }
-                } else if (activeInput == 3 && roomCode.length() > 0) {
-                    // We pressed enter on room code - attempt to join using code
-                    NetworkManager::GetInstance().localUsername = username;
-                    NetworkManager::GetInstance().localSkinIndex = currentSkin;
-                    if (NetworkManager::GetInstance().JoinRoom(roomCode, 7777)) {
-                        // Go to lobby screen
-                        goToLobby = true;
-                        return false;
-                    } else {
-                        activeInput = 0; // Failed to join
-                    }
+                    activeInput = 0;
                 } else if (activeInput == 1) {
-                    activeInput = 0; // Done typing name
+                    activeInput = 0;
                 }
             }
         }
     } else {
-        // Buttons
         Vector2 mousePoint = GetMousePosition();
         float scaleX = (float)GetScreenWidth() / VIRTUAL_WIDTH;
         float scaleY = (float)GetScreenHeight() / VIRTUAL_HEIGHT;
         mousePoint.x /= scaleX;
         mousePoint.y /= scaleY;
 
-        Rectangle nameBtn = { VIRTUAL_WIDTH / 2.0f - 100, VIRTUAL_HEIGHT / 2.0f - 220, 200, 40 };
-        Rectangle skinBtn = { VIRTUAL_WIDTH / 2.0f - 100, VIRTUAL_HEIGHT / 2.0f - 160, 200, 40 };
-        Rectangle hostBtn = { VIRTUAL_WIDTH / 2.0f - 100, VIRTUAL_HEIGHT / 2.0f - 80, 200, 50 };
-        Rectangle joinIpBtn = { VIRTUAL_WIDTH / 2.0f - 100, VIRTUAL_HEIGHT / 2.0f + 10, 200, 50 };
-        Rectangle joinCodeBtn = { VIRTUAL_WIDTH / 2.0f - 100, VIRTUAL_HEIGHT / 2.0f + 80, 200, 50 };
+        Rectangle nameBtn = { VIRTUAL_WIDTH / 2.0f - 100, VIRTUAL_HEIGHT / 2.0f - 200, 200, 40 };
+        Rectangle skinBtn = { VIRTUAL_WIDTH / 2.0f - 100, VIRTUAL_HEIGHT / 2.0f - 140, 200, 40 };
+        Rectangle hostBtn = { VIRTUAL_WIDTH / 2.0f - 100, VIRTUAL_HEIGHT / 2.0f - 60, 200, 50 };
+        Rectangle joinBtn = { VIRTUAL_WIDTH / 2.0f - 100, VIRTUAL_HEIGHT / 2.0f + 30, 200, 50 };
 
         if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
             if (CheckCollisionPointRec(mousePoint, nameBtn)) {
@@ -97,17 +102,12 @@ bool OnlineMenuScreen::Update(float deltaTime) {
             } else if (CheckCollisionPointRec(mousePoint, hostBtn)) {
                 NetworkManager::GetInstance().localUsername = username;
                 NetworkManager::GetInstance().localSkinIndex = currentSkin;
-                if (NetworkManager::GetInstance().HostRoom(7777)) {
-                    // Instead of starting game directly, go to lobby screen
-                    // We'll need to change the screen state in the main loop
-                    // For now, let's set a flag to indicate we should go to lobby
-                    // In a real implementation, we'd change the current screen here
-                    return false; // Go back to main menu for now - we'll fix this properly
+                if (NetworkManager::GetInstance().HostRoom(DEFAULT_GAME_PORT)) {
+                    goToLobby = true;
+                    return false;
                 }
-            } else if (CheckCollisionPointRec(mousePoint, joinIpBtn)) {
-                activeInput = 2; // IP input
-            } else if (CheckCollisionPointRec(mousePoint, joinCodeBtn)) {
-                activeInput = 3; // Room code input
+            } else if (CheckCollisionPointRec(mousePoint, joinBtn)) {
+                activeInput = 2;
             }
         }
     }
@@ -122,14 +122,11 @@ void OnlineMenuScreen::Draw(RenderTexture2D target) {
     DrawText("ONLINE MODE", VIRTUAL_WIDTH / 2 - MeasureText("ONLINE MODE", 40) / 2, 80, 40, WHITE);
 
     if (activeInput == 2) {
-        DrawText("Enter Host IP Address:", VIRTUAL_WIDTH / 2 - 150, VIRTUAL_HEIGHT / 2 - 40, 20, LIGHTGRAY);
+        DrawText("Enter server address:", VIRTUAL_WIDTH / 2 - 150, VIRTUAL_HEIGHT / 2 - 60, 20, LIGHTGRAY);
+        DrawText("Examples: 192.168.1.5  or  abc.gl.at.ply.gg:54321", VIRTUAL_WIDTH / 2 - 250,
+                 VIRTUAL_HEIGHT / 2 - 35, 16, GRAY);
         DrawRectangle(VIRTUAL_WIDTH / 2 - 150, VIRTUAL_HEIGHT / 2 - 10, 300, 40, RAYWHITE);
-        DrawText(ipAddress.c_str(), VIRTUAL_WIDTH / 2 - 140, VIRTUAL_HEIGHT / 2, 20, DARKGRAY);
-        DrawText("Press ENTER to connect, ESC to cancel.", VIRTUAL_WIDTH / 2 - 200, VIRTUAL_HEIGHT / 2 + 50, 20, GRAY);
-    } else if (activeInput == 3) {
-        DrawText("Enter Room Code:", VIRTUAL_WIDTH / 2 - 150, VIRTUAL_HEIGHT / 2 - 40, 20, LIGHTGRAY);
-        DrawRectangle(VIRTUAL_WIDTH / 2 - 150, VIRTUAL_HEIGHT / 2 - 10, 300, 40, RAYWHITE);
-        DrawText(roomCode.c_str(), VIRTUAL_WIDTH / 2 - 140, VIRTUAL_HEIGHT / 2, 20, DARKGRAY);
+        DrawText(joinAddress.c_str(), VIRTUAL_WIDTH / 2 - 140, VIRTUAL_HEIGHT / 2, 20, DARKGRAY);
         DrawText("Press ENTER to connect, ESC to cancel.", VIRTUAL_WIDTH / 2 - 200, VIRTUAL_HEIGHT / 2 + 50, 20, GRAY);
     } else {
         Vector2 mousePoint = GetMousePosition();
@@ -138,42 +135,29 @@ void OnlineMenuScreen::Draw(RenderTexture2D target) {
         mousePoint.x /= scaleX;
         mousePoint.y /= scaleY;
 
-        // Name Button
-        Rectangle nameBtn = { VIRTUAL_WIDTH / 2.0f - 100, VIRTUAL_HEIGHT / 2.0f - 220, 200, 40 };
+        Rectangle nameBtn = { VIRTUAL_WIDTH / 2.0f - 100, VIRTUAL_HEIGHT / 2.0f - 200, 200, 40 };
         DrawRectangleRec(nameBtn, (activeInput == 1) ? WHITE : (CheckCollisionPointRec(mousePoint, nameBtn) ? LIGHTGRAY : GRAY));
         DrawText(username.c_str(), nameBtn.x + 10, nameBtn.y + 10, 20, BLACK);
         DrawText("Name", nameBtn.x - 60, nameBtn.y + 10, 20, RAYWHITE);
 
-        // Skin Button
-        Rectangle skinBtn = { VIRTUAL_WIDTH / 2.0f - 100, VIRTUAL_HEIGHT / 2.0f - 160, 200, 40 };
+        Rectangle skinBtn = { VIRTUAL_WIDTH / 2.0f - 100, VIRTUAL_HEIGHT / 2.0f - 140, 200, 40 };
         DrawRectangleRec(skinBtn, CheckCollisionPointRec(mousePoint, skinBtn) ? LIGHTGRAY : GRAY);
         std::string skinText = "Char " + std::to_string(currentSkin);
         DrawText(skinText.c_str(), skinBtn.x + 60, skinBtn.y + 10, 20, BLACK);
         DrawText("Skin", skinBtn.x - 60, skinBtn.y + 10, 20, RAYWHITE);
 
-        // Host Button
-        Rectangle hostBtn = { VIRTUAL_WIDTH / 2.0f - 100, VIRTUAL_HEIGHT / 2.0f - 80, 200, 50 };
+        Rectangle hostBtn = { VIRTUAL_WIDTH / 2.0f - 100, VIRTUAL_HEIGHT / 2.0f - 60, 200, 50 };
         DrawRectangleRec(hostBtn, CheckCollisionPointRec(mousePoint, hostBtn) ? LIGHTGRAY : GRAY);
         DrawText("Create Room (Host)", hostBtn.x + 10, hostBtn.y + 15, 20, BLACK);
 
-        // Join via IP Button
-        Rectangle joinIpBtn = { VIRTUAL_WIDTH / 2.0f - 100, VIRTUAL_HEIGHT / 2.0f + 10, 200, 50 };
-        DrawRectangleRec(joinIpBtn, CheckCollisionPointRec(mousePoint, joinIpBtn) ? LIGHTGRAY : GRAY);
-        DrawText("Join Room (IP)", joinIpBtn.x + 10, joinIpBtn.y + 15, 20, BLACK);
+        Rectangle joinBtn = { VIRTUAL_WIDTH / 2.0f - 100, VIRTUAL_HEIGHT / 2.0f + 30, 200, 50 };
+        DrawRectangleRec(joinBtn, CheckCollisionPointRec(mousePoint, joinBtn) ? LIGHTGRAY : GRAY);
+        DrawText("Join Room", joinBtn.x + 50, joinBtn.y + 15, 20, BLACK);
 
-        // Join via Code Button
-        Rectangle joinCodeBtn = { VIRTUAL_WIDTH / 2.0f - 100, VIRTUAL_HEIGHT / 2.0f + 80, 200, 50 };
-        DrawRectangleRec(joinCodeBtn, CheckCollisionPointRec(mousePoint, joinCodeBtn) ? LIGHTGRAY : GRAY);
-        DrawText("Join Room (Code)", joinCodeBtn.x + 10, joinCodeBtn.y + 15, 20, BLACK);
-
-        // Display room code if hosting
-        if (isHosting && !roomCode.empty()) {
-            DrawText("Your Room Code:", VIRTUAL_WIDTH / 2 - 100, VIRTUAL_HEIGHT / 2 + 150, 20, LIGHTGRAY);
-            DrawRectangle(VIRTUAL_WIDTH / 2 - 100, VIRTUAL_HEIGHT / 2 + 170, 200, 40, RAYWHITE);
-            DrawText(roomCode.c_str(), VIRTUAL_WIDTH / 2 - 90, VIRTUAL_HEIGHT / 2 + 180, 20, DARKGRAY);
-            DrawText("Share this code with friends to join", VIRTUAL_WIDTH / 2 - 140, VIRTUAL_HEIGHT / 2 + 220, 15, GRAY);
-        }
+        DrawText("Host: use playit.gg UDP tunnel -> port 7777", VIRTUAL_WIDTH / 2 - 180,
+                 VIRTUAL_HEIGHT / 2 + 100, 16, GRAY);
+        DrawText("Join: paste playit address (host:port) or LAN IP", VIRTUAL_WIDTH / 2 - 200,
+                 VIRTUAL_HEIGHT / 2 + 120, 16, GRAY);
     }
-
     EndTextureMode();
 }

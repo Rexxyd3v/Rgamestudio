@@ -2,11 +2,13 @@
 #define NOGDI
 #define NOUSER
 #include "network_manager.h"
+#include "../constants.h"
 #include <iostream>
 #include <cstring>
 #include <cstdlib>
 #include <ctime>
 #include <algorithm>
+#include <cctype>
 
 
 
@@ -131,42 +133,91 @@ bool NetworkManager::HostRoom(int port) {
     return true;
 }
 
-bool NetworkManager::JoinRoom(const std::string& ipAddress, int port) {
-    host = enet_host_create(nullptr, 1, 2, 0, 0);
-    if (host == nullptr) {
+bool NetworkManager::ParseServerAddress(const std::string& address, std::string& host, int& port,
+                                          int defaultPort) {
+    host = address;
+    port = defaultPort;
+
+    while (!host.empty() && std::isspace(static_cast<unsigned char>(host.front()))) {
+        host.erase(host.begin());
+    }
+    while (!host.empty() && std::isspace(static_cast<unsigned char>(host.back()))) {
+        host.pop_back();
+    }
+
+    if (host.empty()) {
+        return false;
+    }
+
+    const size_t colonPos = host.rfind(':');
+    if (colonPos != std::string::npos && colonPos > 0) {
+        const std::string portStr = host.substr(colonPos + 1);
+        if (!portStr.empty()) {
+            bool allDigits = true;
+            for (char c : portStr) {
+                if (!std::isdigit(static_cast<unsigned char>(c))) {
+                    allDigits = false;
+                    break;
+                }
+            }
+            if (allDigits) {
+                const int parsedPort = std::atoi(portStr.c_str());
+                if (parsedPort > 0 && parsedPort <= 65535) {
+                    port = parsedPort;
+                    host = host.substr(0, colonPos);
+                }
+            }
+        }
+    }
+
+    return !host.empty();
+}
+
+bool NetworkManager::JoinRoom(const std::string& address, int defaultPort) {
+    std::string hostName;
+    int port = defaultPort;
+    if (!ParseServerAddress(address, hostName, port, defaultPort)) {
+        std::cerr << "Invalid server address: " << address << std::endl;
+        return false;
+    }
+
+    ENetHost* clientHost = enet_host_create(nullptr, 1, 2, 0, 0);
+    if (clientHost == nullptr) {
         std::cerr << "An error occurred while trying to create an ENet client host." << std::endl;
         return false;
     }
 
-    ENetAddress address;
-    enet_address_set_host(&address, ipAddress.c_str());
-    address.port = port;
+    ENetAddress enetAddress;
+    if (enet_address_set_host(&enetAddress, hostName.c_str()) != 0) {
+        std::cerr << "Failed to resolve host: " << hostName << std::endl;
+        enet_host_destroy(clientHost);
+        return false;
+    }
+    enetAddress.port = static_cast<enet_uint16>(port);
 
-    serverPeer = enet_host_connect(host, &address, 2, 0);
-    if (serverPeer == nullptr) {
+    ENetPeer* peer = enet_host_connect(clientHost, &enetAddress, 2, 0);
+    if (peer == nullptr) {
         std::cerr << "No available peers for initiating an ENet connection." << std::endl;
-        enet_host_destroy(host);
-        host = nullptr;
+        enet_host_destroy(clientHost);
         return false;
     }
 
     ENetEvent event;
-    if (enet_host_service(host, &event, 5000) > 0 && event.type == ENET_EVENT_TYPE_CONNECT) {
-        std::cout << "Connection to " << ipAddress << ":" << port << " succeeded." << std::endl;
+    if (enet_host_service(clientHost, &event, 5000) > 0 && event.type == ENET_EVENT_TYPE_CONNECT) {
+        std::cout << "Connection to " << hostName << ":" << port << " succeeded." << std::endl;
+        host = clientHost;
+        serverPeer = peer;
         isHost = false;
         isConnected = true;
         waitingForAssignment = true;
-        localPlayerID = 0; 
-
-        
+        localPlayerID = 0;
         return true;
-    } else {
-        enet_peer_reset(serverPeer);
-        std::cerr << "Connection to " << ipAddress << ":" << port << " failed." << std::endl;
-        enet_host_destroy(host);
-        host = nullptr;
-        return false;
     }
+
+    enet_peer_reset(peer);
+    std::cerr << "Connection to " << hostName << ":" << port << " failed." << std::endl;
+    enet_host_destroy(clientHost);
+    return false;
 }
 
 void NetworkManager::Disconnect() {
@@ -241,7 +292,7 @@ void NetworkManager::Update() {
                         connectPacket.header.type = PacketType::PLAYER_CONNECT;
                         connectPacket.header.playerID = existingPlayer.peerID;
                         strncpy(connectPacket.username, existingPlayer.username.c_str(),
-                                sizeof(connectPacket.username) - 1);
+                        sizeof(connectPacket.username) - 1);
                         connectPacket.username[sizeof(connectPacket.username) - 1] = '\0';
                         connectPacket.charSkin = existingPlayer.charSkin;
 

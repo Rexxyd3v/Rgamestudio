@@ -8,6 +8,10 @@ LobbyScreen::LobbyScreen() :
     isHost(NetworkManager::GetInstance().IsHost()),
     playerName(NetworkManager::GetInstance().localUsername),
     playerSkin(NetworkManager::GetInstance().localSkinIndex) {
+    if (isHost) {
+        lanAddress = NetworkManager::GetInstance().GetLocalIPAddress() + ":" +
+                     std::to_string(DEFAULT_GAME_PORT);
+    }
 }
 
 LobbyScreen::~LobbyScreen() {
@@ -26,8 +30,12 @@ bool LobbyScreen::Update(float deltaTime) {
 
     // Handle input
     if (IsKeyPressed(KEY_ESCAPE)) {
-        // Go back to online menu
+        NetworkManager::GetInstance().Disconnect();
         return false;
+    }
+
+    if (isHost && IsKeyPressed(KEY_C) && !lanAddress.empty()) {
+        SetClipboardText(lanAddress.c_str());
     }
 
     // Handle ready toggle (for both host and clients)
@@ -77,10 +85,15 @@ void LobbyScreen::Draw(RenderTexture2D target) {
     if (isHost) {
         DrawText("Press SPACE to Start Game (when all ready)", 20, 160, 20,
                 NetworkManager::GetInstance().AllPlayersReady() ? GREEN : GRAY);
+
+        DrawText("Share with friends:", 20, 190, 18, LIGHTGRAY);
+        DrawText(("LAN: " + lanAddress).c_str(), 20, 212, 18, SKYBLUE);
+        DrawText("playit.gg: share your tunnel address (host:port)", 20, 234, 16, GRAY);
+        DrawText("Press C to copy LAN address to clipboard", 20, 254, 16, GRAY);
     }
 
     // Player list
-    DrawPlayerList(20, 200, VIRTUAL_WIDTH - 40, VIRTUAL_HEIGHT - 280);
+    DrawPlayerList(20, isHost ? 280 : 200, VIRTUAL_WIDTH - 40, VIRTUAL_HEIGHT - (isHost ? 360 : 280));
 
     // Status messages
     if (isHost) {

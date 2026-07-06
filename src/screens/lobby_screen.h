@@ -19,6 +19,7 @@ private:
     bool startGame;
     bool isHost;
     std::string playerName;
+    std::string lanAddress;
     int playerSkin;
 
     // Helper methods

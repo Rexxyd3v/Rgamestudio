@@ -77,12 +77,10 @@ int main() {
                 } else if (isLobbyActive) {
                     LobbyScreen* lobby = static_cast<LobbyScreen*>(currentScreen);
                     if (lobby->ShouldStartGame()) {
-                        // Start the game
                         delete currentScreen;
                         currentScreen = new GameplayScreen(GameMode::ONLINE);
                         isLobbyActive = false;
-                    } else if (!lobby->Update(deltaTime)) {
-                        // User backed out from lobby
+                    } else {
                         delete currentScreen;
                         currentScreen = new MainMenuScreen();
                         isLobbyActive = false;

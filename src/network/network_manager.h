@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 #include <ws2tcpip.h>
+#include "../constants.h"
 #include "packets.h"
 
 class NetworkManager {
@@ -20,10 +21,14 @@ public:
     void Shutdown();
 
     // Host a room
-    bool HostRoom(int port = 7777);
+    bool HostRoom(int port = DEFAULT_GAME_PORT);
 
-    // Join a room
-    bool JoinRoom(const std::string& ipAddress, int port = 7777);
+    // Join a room. Address may be "host" or "host:port" (e.g. playit.gg tunnel).
+    bool JoinRoom(const std::string& address, int defaultPort = DEFAULT_GAME_PORT);
+
+    // Parse "host" or "host:port" into host + port. Returns false if host is empty.
+    static bool ParseServerAddress(const std::string& address, std::string& host, int& port,
+                                   int defaultPort = DEFAULT_GAME_PORT);
 
     // Disconnect or stop hosting
     void Disconnect();

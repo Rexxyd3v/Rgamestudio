@@ -18,11 +18,9 @@ public:
 private:
     bool startGame;
     bool goToLobby;
-    int activeInput; // 0 = none, 1 = username, 2 = ip, 3 = room code
-    std::string ipAddress;
+    int activeInput; // 0 = none, 1 = username, 2 = join address
+    std::string joinAddress;
     std::string username;
     int currentSkin;
-    std::string roomCode; // For displaying room code when hosting
-    bool isHosting;     // Track if we're currently hosting
 };
 #endif // ONLINE_MENU_H
