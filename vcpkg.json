@@ -1,0 +1,9 @@
+{
+  "name": "rgamestudio",
+  "version": "1.0.0",
+  "description": "A lightweight multiplayer shooter with Raylib and ENet",
+  "dependencies": [
+    "raylib",
+    "enet"
+  ]
+}
