@@ -10,35 +10,72 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ─── Setup MSYS2 (same toolchain as dev machine) ───────────────────────
+      - name: Setup MSYS2
+        uses: msys2/setup-msys2@v2
         with:
-          submodules: recursive
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-raylib
+            mingw-w64-ucrt-x86_64-enet
 
-      - name: Setup vcpkg
+      # ─── Build the game ─────────────────────────────────────────────────────
+      - name: Build Rgamestudio
+        shell: msys2 {0}
         run: |
-          git clone https://github.com/microsoft/vcpkg.git
-          cd vcpkg
-          .\bootstrap-vcpkg.bat
+          mkdir -p bin
+          g++ src/*.cpp src/screens/*.cpp src/utils/*.cpp src/entities/*.cpp src/network/*.cpp \
+            -o bin/Rgamestudio.exe \
+            -lraylib -lenet -lws2_32 -lopengl32 -lgdi32 -lwinmm \
+            -O2 -std=c++17
 
-      - name: Install dependencies
+      # ─── Collect required DLLs from MSYS2 automatically ────────────────────
+      - name: Collect DLLs and Assets
+        shell: msys2 {0}
         run: |
-          cd vcpkg
-          .\vcpkg install raylib:x64-windows enet:x64-windows
+          mkdir -p release_package
 
-      - name: Configure CMake
+          # Copy the built exe
+          cp bin/Rgamestudio.exe release_package/
+
+          # Copy assets folder
+          cp -r assets release_package/
+
+          # Automatically find and copy all required DLLs (only from /ucrt64/bin)
+          ldd bin/Rgamestudio.exe \
+            | grep '/ucrt64/bin' \
+            | awk '{print $3}' \
+            | xargs -I{} cp {} release_package/
+
+      # ─── Create ZIP for release ─────────────────────────────────────────────
+      - name: Create release ZIP
+        shell: pwsh
         run: |
-          cmake -B build ^
-            -G "Visual Studio 17 2022" ^
-            -A x64 ^
-            -DCMAKE_TOOLCHAIN_FILE=%CD%\vcpkg\scripts\buildsystems\cmake.toolchain.cmake
+          $tag = "${{ github.ref_name }}"
+          Compress-Archive -Path release_package\* -DestinationPath "Rgamestudio-$tag-windows.zip"
 
-      - name: Build
-        run: |
-          cmake --build build --config Release
-
-      - name: Upload Release Asset
+      # ─── Upload to GitHub Release ───────────────────────────────────────────
+      - name: Upload Release
         uses: softprops/action-gh-release@v2
         with:
-          files: build/Release/RGameStudio.exe
+          name: "Rgamestudio ${{ github.ref_name }}"
+          body: |
+            ## Rgamestudio ${{ github.ref_name }}
+
+            ### How to Play
+            1. Download `Rgamestudio-${{ github.ref_name }}-windows.zip`
+            2. Extract the ZIP anywhere on your PC
+            3. Double-click `Rgamestudio.exe` — No installation needed!
+
+            ### Requirements
+            - Windows 10 or later (64-bit)
+          files: "Rgamestudio-${{ github.ref_name }}-windows.zip"
+          draft: false
+          prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
