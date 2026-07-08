@@ -22,7 +22,10 @@ NetworkManager::NetworkManager()
       localKills(0),
       localDeaths(0),
       waitingForAssignment(false),
-      nextPlayerID(1) // Host is always 0; clients start at 1, monotonically increasing
+      nextPlayerID(1), // Host is always 0; clients start at 1, monotonically increasing
+      joinState(JoinState::IDLE),
+      pendingPeer(nullptr),
+      joinTimeoutTimer(0.0f)
 {
     localUsername = "Player";
 }
@@ -203,7 +206,9 @@ bool NetworkManager::JoinRoom(const std::string& address, int defaultPort) {
     }
 
     ENetEvent event;
-    if (enet_host_service(clientHost, &event, 5000) > 0 && event.type == ENET_EVENT_TYPE_CONNECT) {
+    // Use a longer timeout for internet connections (e.g. PlayIt.gg tunnels) which
+    // can have higher latency than a direct LAN connection.
+    if (enet_host_service(clientHost, &event, 10000) > 0 && event.type == ENET_EVENT_TYPE_CONNECT) {
         std::cout << "Connection to " << hostName << ":" << port << " succeeded." << std::endl;
         host = clientHost;
         serverPeer = peer;
@@ -211,6 +216,12 @@ bool NetworkManager::JoinRoom(const std::string& address, int defaultPort) {
         isConnected = true;
         waitingForAssignment = true;
         localPlayerID = 0;
+
+        // Configure peer timeouts for internet play via tunnels (e.g. PlayIt.gg).
+        // Default ENet timeouts are too aggressive (~5s) for tunneled connections.
+        // timeoutLimit=32 retries, timeoutMinimum=5000ms, timeoutMaximum=30000ms
+        enet_peer_timeout(serverPeer, 32, 5000, 30000);
+
         return true;
     }
 
@@ -219,6 +230,103 @@ bool NetworkManager::JoinRoom(const std::string& address, int defaultPort) {
     enet_host_destroy(clientHost);
     return false;
 }
+
+// ---------------------------------------------------------------------------
+// Async (non-blocking) join implementation
+// ---------------------------------------------------------------------------
+bool NetworkManager::BeginJoinRoom(const std::string& address, int defaultPort) {
+    // Sanity: only start if we're idle
+    if (joinState == JoinState::CONNECTING) return false;
+
+    std::string hostName;
+    int port = defaultPort;
+    if (!ParseServerAddress(address, hostName, port, defaultPort)) {
+        std::cerr << "[Async] Invalid server address: " << address << std::endl;
+        joinState = JoinState::FAILED;
+        return false;
+    }
+
+    ENetHost* clientHost = enet_host_create(nullptr, 1, 2, 0, 0);
+    if (!clientHost) {
+        std::cerr << "[Async] Failed to create ENet client host." << std::endl;
+        joinState = JoinState::FAILED;
+        return false;
+    }
+
+    ENetAddress enetAddress;
+    if (enet_address_set_host(&enetAddress, hostName.c_str()) != 0) {
+        std::cerr << "[Async] Failed to resolve host: " << hostName << std::endl;
+        enet_host_destroy(clientHost);
+        joinState = JoinState::FAILED;
+        return false;
+    }
+    enetAddress.port = static_cast<enet_uint16>(port);
+
+    ENetPeer* peer = enet_host_connect(clientHost, &enetAddress, 2, 0);
+    if (!peer) {
+        std::cerr << "[Async] No available peers." << std::endl;
+        enet_host_destroy(clientHost);
+        joinState = JoinState::FAILED;
+        return false;
+    }
+
+    // Store the in-progress host/peer for PollJoinRoom()
+    host = clientHost;
+    pendingPeer = peer;
+    joinState = JoinState::CONNECTING;
+    joinTimeoutTimer = 15.0f; // 15 second timeout for internet tunnels
+    isHost = false;
+    isConnected = false;
+
+    std::cout << "[Async] Connecting to " << hostName << ":" << port << " ..." << std::endl;
+    return true;
+}
+
+NetworkManager::JoinState NetworkManager::PollJoinRoom() {
+    if (joinState != JoinState::CONNECTING || !host) return joinState;
+
+    // Decrease timeout
+    // NOTE: We don't have deltaTime here so we use a small fixed step.
+    // Caller should call this once per frame (~60fps), so each call ~= 16ms.
+    joinTimeoutTimer -= (1.0f / 60.0f);
+    if (joinTimeoutTimer <= 0.0f) {
+        std::cerr << "[Async] Connection timed out." << std::endl;
+        if (pendingPeer) enet_peer_reset(pendingPeer);
+        enet_host_destroy(host);
+        host = nullptr;
+        pendingPeer = nullptr;
+        joinState = JoinState::FAILED;
+        return joinState;
+    }
+
+    // Non-blocking poll (timeout=0 means don't wait)
+    ENetEvent event;
+    int result = enet_host_service(host, &event, 0);
+    if (result > 0) {
+        if (event.type == ENET_EVENT_TYPE_CONNECT) {
+            std::cout << "[Async] Connected!" << std::endl;
+            serverPeer = pendingPeer;
+            pendingPeer = nullptr;
+            isConnected = true;
+            waitingForAssignment = true;
+            localPlayerID = 0;
+            // Apply generous timeout for tunnel connections
+            enet_peer_timeout(serverPeer, 32, 5000, 30000);
+            joinState = JoinState::CONNECTED;
+        } else if (event.type == ENET_EVENT_TYPE_DISCONNECT) {
+            std::cerr << "[Async] Connection refused / disconnected." << std::endl;
+            enet_host_destroy(host);
+            host = nullptr;
+            pendingPeer = nullptr;
+            joinState = JoinState::FAILED;
+        } else if (event.type == ENET_EVENT_TYPE_RECEIVE) {
+            enet_packet_destroy(event.packet); // Discard stray packets during handshake
+        }
+    }
+
+    return joinState;
+}
+
 
 void NetworkManager::Disconnect() {
     if (host != nullptr) {
@@ -255,6 +363,9 @@ void NetworkManager::Disconnect() {
     incomingEvents.clear();
     incomingPeerIDToPlayerID.clear();
     nextPlayerID = 1;
+    joinState = JoinState::IDLE;
+    pendingPeer = nullptr;
+    joinTimeoutTimer = 0.0f;
 }
 
 void NetworkManager::Update() {
@@ -271,12 +382,14 @@ void NetworkManager::Update() {
                           << event.peer->address.host << ":"
                           << event.peer->address.port << std::endl;
                 if (isHost) {
-          
 
                     uint16_t incomingPeerID = event.peer->incomingPeerID;
                     uint32_t newPlayerID = AllocatePlayerID();
                     RegisterPeerMapping(incomingPeerID, newPlayerID);
                     UpsertPlayer(newPlayerID, "Unknown", 1);
+
+                    // Configure generous peer timeouts for internet/tunnel connections.
+                    enet_peer_timeout(event.peer, 32, 5000, 30000);
 
                     PacketIDAssignment idPkt{};
                     idPkt.header.type = PacketType::ID_ASSIGNMENT;

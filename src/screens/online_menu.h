@@ -22,5 +22,7 @@ private:
     std::string joinAddress;
     std::string username;
     int currentSkin;
+    bool isConnecting;         // True while async join is in progress
+    std::string connectError;  // Set when a join attempt fails
 };
 #endif // ONLINE_MENU_H

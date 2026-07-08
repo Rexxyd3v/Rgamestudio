@@ -2,20 +2,8 @@
 #include "../network/network_manager.h"
 #include "../constants.h"
 #include <iostream>
+#include <cmath>
 #include "raylib.h"
-
-namespace {
-bool TryJoinRoom(const std::string& address, bool& goToLobby) {
-    if (address.empty()) {
-        return false;
-    }
-    if (NetworkManager::GetInstance().JoinRoom(address)) {
-        goToLobby = true;
-        return true;
-    }
-    return false;
-}
-} // namespace
 
 OnlineMenuScreen::OnlineMenuScreen() :
     startGame(false),
@@ -23,13 +11,40 @@ OnlineMenuScreen::OnlineMenuScreen() :
     activeInput(0),
     joinAddress(""),
     username("Player"),
-    currentSkin(1) {
+    currentSkin(1),
+    isConnecting(false),
+    connectError("") {
 }
 
 OnlineMenuScreen::~OnlineMenuScreen() {
 }
 
 bool OnlineMenuScreen::Update(float deltaTime) {
+    // -----------------------------------------------------------------------
+    // Async connecting state: poll every frame
+    // -----------------------------------------------------------------------
+    if (isConnecting) {
+        auto state = NetworkManager::GetInstance().PollJoinRoom();
+        if (state == NetworkManager::JoinState::CONNECTED) {
+            isConnecting = false;
+            goToLobby = true;
+            return false; // Transition to lobby
+        } else if (state == NetworkManager::JoinState::FAILED) {
+            isConnecting = false;
+            connectError = "Connection failed. Check the address and try again.";
+        }
+        // Allow ESC to cancel
+        if (IsKeyPressed(KEY_ESCAPE)) {
+            NetworkManager::GetInstance().Disconnect();
+            isConnecting = false;
+            connectError = "Connection cancelled.";
+        }
+        return true; // Keep updating while connecting
+    }
+
+    // -----------------------------------------------------------------------
+    // Normal input handling
+    // -----------------------------------------------------------------------
     if (IsKeyPressed(KEY_ESCAPE)) {
         if (activeInput != 0) {
             activeInput = 0;
@@ -70,10 +85,14 @@ bool OnlineMenuScreen::Update(float deltaTime) {
 
             if (IsKeyPressed(KEY_ENTER)) {
                 if (activeInput == 2) {
+                    // Start async join
+                    connectError = "";
                     NetworkManager::GetInstance().localUsername = username;
                     NetworkManager::GetInstance().localSkinIndex = currentSkin;
-                    if (TryJoinRoom(joinAddress, goToLobby)) {
-                        return false;
+                    if (NetworkManager::GetInstance().BeginJoinRoom(joinAddress)) {
+                        isConnecting = true;
+                    } else {
+                        connectError = "Invalid address.";
                     }
                     activeInput = 0;
                 } else if (activeInput == 1) {
@@ -94,6 +113,7 @@ bool OnlineMenuScreen::Update(float deltaTime) {
         Rectangle joinBtn = { VIRTUAL_WIDTH / 2.0f - 100, VIRTUAL_HEIGHT / 2.0f + 30, 200, 50 };
 
         if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+            connectError = ""; // Clear old error on any click
             if (CheckCollisionPointRec(mousePoint, nameBtn)) {
                 activeInput = 1;
             } else if (CheckCollisionPointRec(mousePoint, skinBtn)) {
@@ -121,6 +141,25 @@ void OnlineMenuScreen::Draw(RenderTexture2D target) {
 
     DrawText("ONLINE MODE", VIRTUAL_WIDTH / 2 - MeasureText("ONLINE MODE", 40) / 2, 80, 40, WHITE);
 
+    // -----------------------------------------------------------------------
+    // Connecting overlay
+    // -----------------------------------------------------------------------
+    if (isConnecting) {
+        // Animated dots
+        int dots = (int)(GetTime() * 2.0) % 4;
+        std::string dotsStr(dots, '.');
+        std::string msg = "Connecting" + dotsStr;
+        DrawText(msg.c_str(), VIRTUAL_WIDTH / 2 - MeasureText(msg.c_str(), 30) / 2,
+                 VIRTUAL_HEIGHT / 2 - 30, 30, YELLOW);
+        DrawText("Press ESC to cancel", VIRTUAL_WIDTH / 2 - MeasureText("Press ESC to cancel", 18) / 2,
+                 VIRTUAL_HEIGHT / 2 + 20, 18, GRAY);
+        EndTextureMode();
+        return;
+    }
+
+    // -----------------------------------------------------------------------
+    // Normal UI
+    // -----------------------------------------------------------------------
     if (activeInput == 2) {
         DrawText("Enter server address:", VIRTUAL_WIDTH / 2 - 150, VIRTUAL_HEIGHT / 2 - 60, 20, LIGHTGRAY);
         DrawText("Examples: 192.168.1.5  or  abc.gl.at.ply.gg:54321", VIRTUAL_WIDTH / 2 - 250,
@@ -159,5 +198,14 @@ void OnlineMenuScreen::Draw(RenderTexture2D target) {
         DrawText("Join: paste playit address (host:port) or LAN IP", VIRTUAL_WIDTH / 2 - 200,
                  VIRTUAL_HEIGHT / 2 + 120, 16, GRAY);
     }
+
+    // Show connection error if any
+    if (!connectError.empty()) {
+        DrawRectangle(0, VIRTUAL_HEIGHT - 60, VIRTUAL_WIDTH, 50, Fade(RED, 0.8f));
+        DrawText(connectError.c_str(),
+                 VIRTUAL_WIDTH / 2 - MeasureText(connectError.c_str(), 20) / 2,
+                 VIRTUAL_HEIGHT - 44, 20, WHITE);
+    }
+
     EndTextureMode();
 }

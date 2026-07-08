@@ -1,8 +1,8 @@
 {
     "code-runner.runInTerminal": true,
     "code-runner.executorMap": {
-        "c": "cd \"$workspaceRoot\\openc\" && gcc src\\*.c src\\screens\\*.c src\\utils\\*.c src\\entities\\*.c src\\network\\*.c -I vcpkg\\installed\\x64-mingw-static\\include -L vcpkg\\installed\\x64-mingw-static\\lib -o bin\\Rgamestudio.exe -lenet -lws2_32 -lraylib -lopengl32 -lgdi32 -lwinmm && bin\\Rgamestudio.exe",
-        "cpp": "cd \"$workspaceRoot\\openc\" && g++ src\\*.cpp src\\screens\\*.cpp src\\utils\\*.cpp src\\entities\\*.cpp src\\network\\*.cpp -I vcpkg\\installed\\x64-mingw-static\\include -L vcpkg\\installed\\x64-mingw-static\\lib -o bin\\Rgamestudio.exe -lenet -lws2_32 -lraylib -lopengl32 -lgdi32 -lwinmm && bin\\Rgamestudio.exe"
+        "c": "cd \"$workspaceRoot\\openc\" && gcc src\\*.c src\\screens\\*.c src\\utils\\*.c src\\entities\\*.c src\\network\\*.c -I vcpkg\\installed\\x64-mingw-static\\include -L vcpkg\\installed\\x64-mingw-static\\lib -o bin\\Rgamestudio.exe -static -static-libgcc -lenet -lws2_32 -lraylib -lopengl32 -lgdi32 -lwinmm && bin\\Rgamestudio.exe",
+        "cpp": "cd \"$workspaceRoot\\openc\" && g++ src\\*.cpp src\\screens\\*.cpp src\\utils\\*.cpp src\\entities\\*.cpp src\\network\\*.cpp -I vcpkg\\installed\\x64-mingw-static\\include -L vcpkg\\installed\\x64-mingw-static\\lib -o bin\\Rgamestudio.exe -static -static-libgcc -static-libstdc++ -lenet -lws2_32 -lraylib -lopengl32 -lgdi32 -lwinmm && bin\\Rgamestudio.exe"
     },
     "cmake.sourceDirectory": "C:/Users/rexje/Downloads/Compressed/PROJECT-20260611T114322Z-3-001/PROJECT/openc/vcpkg/ports/7zip"
 }

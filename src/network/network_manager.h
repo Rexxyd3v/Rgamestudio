@@ -26,6 +26,12 @@ public:
     // Join a room. Address may be "host" or "host:port" (e.g. playit.gg tunnel).
     bool JoinRoom(const std::string& address, int defaultPort = DEFAULT_GAME_PORT);
 
+    // Async (non-blocking) join: call BeginJoinRoom() once, then poll PollJoinRoom() every frame.
+    enum class JoinState { IDLE, CONNECTING, CONNECTED, FAILED };
+    bool BeginJoinRoom(const std::string& address, int defaultPort = DEFAULT_GAME_PORT);
+    JoinState PollJoinRoom(); // Call every frame until CONNECTED or FAILED
+    JoinState GetJoinState() const { return joinState; }
+
     // Parse "host" or "host:port" into host + port. Returns false if host is empty.
     static bool ParseServerAddress(const std::string& address, std::string& host, int& port,
                                    int defaultPort = DEFAULT_GAME_PORT);
@@ -81,6 +87,11 @@ private:
     bool isConnected;
     uint32_t localPlayerID;   // Authoritative playerID for this client (assigned by host; 0 = host)
     bool waitingForAssignment; // Set to true after connecting as client, waiting for ID assignment from host
+
+    // Async join state
+    JoinState joinState;
+    ENetPeer* pendingPeer;      // Peer being connected to (async join)
+    float joinTimeoutTimer;     // Seconds remaining before async join times out
 
     // Player tracking for lobby. The PlayerInfo.peerID field is repurposed to mean
     // "authoritative playerID assigned by the host". It is NEVER set from ENet incomingPeerID
