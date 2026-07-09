@@ -6,27 +6,43 @@ MainMenuScreen::MainMenuScreen() {
     if (menuFont.texture.id == 0) {
         menuFont = GetFontDefault();
     }
-    
+
     selectedMode = GameMode::NONE;
-    
+    shouldTransition = false;
+
     float btnWidth = 400.0f;
     float btnHeight = 80.0f;
     float startX = VIRTUAL_WIDTH / 2.0f - btnWidth / 2.0f;
-    
+
     btn1Player = { startX, 300.0f, btnWidth, btnHeight };
     btn2Player = { startX, 420.0f, btnWidth, btnHeight };
-    
+
     hover1P = false;
     hover2P = false;
+
+    // Load and play main menu music (looping)
+    mainMenuMusic = LoadMusicStream("assets/sounds/MAINSOUNDTRACK.wav");
+    PlayMusicStream(mainMenuMusic);
+
+    // Load choice sound
+    choiceSound = LoadSound("assets/sounds/choice.wav");
 }
 
 MainMenuScreen::~MainMenuScreen() {
     if (menuFont.texture.id != GetFontDefault().texture.id) {
         UnloadFont(menuFont);
     }
+
+    // Unload music (keep sound effect loaded for duration of program)
+    UnloadMusicStream(mainMenuMusic);
+    // Note: Intentionally not unloading choiceSound to avoid cutting off the sound effect
+    // when transitioning immediately after playing it.
 }
 
 bool MainMenuScreen::Update(float deltaTime) {
+    // Update music
+    UpdateMusicStream(mainMenuMusic);
+
     Vector2 mouseScreen = GetMousePosition();
     float scaleX = (float)VIRTUAL_WIDTH  / (float)GetScreenWidth();
     float scaleY = (float)VIRTUAL_HEIGHT / (float)GetScreenHeight();
@@ -38,29 +54,31 @@ bool MainMenuScreen::Update(float deltaTime) {
     if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
         if (hover1P) {
             selectedMode = GameMode::OFFLINE;
+            PlaySound(choiceSound); // Play choice sound
             return false; // Transition
         }
         if (hover2P) {
             selectedMode = GameMode::ONLINE;
+            PlaySound(choiceSound); // Play choice sound
             return false; // Transition
         }
     }
-    
+
     return true; // Keep running
 }
 
 void MainMenuScreen::Draw(RenderTexture2D target) {
     BeginTextureMode(target);
     ClearBackground(BLACK);
-    
+
     DrawTextEx(menuFont, "MAIN MENU", { VIRTUAL_WIDTH / 2.0f - MeasureTextEx(menuFont, "MAIN MENU", 80, 2).x / 2.0f, 100 }, 80, 2, WHITE);
-    
+
     // Draw 1 Player Button
     DrawRectangleRec(btn1Player, hover1P ? DARKGRAY : GRAY);
     DrawRectangleLinesEx(btn1Player, 3, hover1P ? WHITE : LIGHTGRAY);
     Vector2 text1PSize = MeasureTextEx(menuFont, "OFFLINE MODE", 40, 2);
     DrawTextEx(menuFont, "OFFLINE MODE", { btn1Player.x + btn1Player.width/2 - text1PSize.x/2, btn1Player.y + btn1Player.height/2 - text1PSize.y/2 }, 40, 2, WHITE);
-    
+
     // Draw 2 Player Button
     DrawRectangleRec(btn2Player, hover2P ? DARKGRAY : GRAY);
     DrawRectangleLinesEx(btn2Player, 3, hover2P ? WHITE : LIGHTGRAY);

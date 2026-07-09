@@ -29,8 +29,10 @@ void Player::Update(float deltaTime) {
     // ---- JUMP ----
     // Allow jumping from both flat ground (floorHeight==0) and on a platform
     bool isOnGround = (jumpHeight <= floorHeight + 1.0f && jumpVelocity <= 0.0f);
+    bool startedJumpThisFrame = false;
     if (IsKeyPressed(KEY_SPACE) && isOnGround) {
         jumpVelocity = 420.0f;
+        startedJumpThisFrame = true;
     }
     UpdatePhysics(deltaTime);
 
@@ -75,8 +77,36 @@ void Player::Update(float deltaTime) {
     if (position.y < 30.0f)    position.y = 30.0f;
     if (position.y > 2010.0f)  position.y = 2010.0f;
 
-    if (moving) SetState(CharState::WALK);
-    else        SetState(CharState::IDLE);
+    // ---- STATE PICKING (jump takes priority over walk/idle) ----
+    if (!isOnGround) {
+        if (jumpVelocity > 0.0f) {
+            // Going up
+            if (startedJumpThisFrame || currentState != CharState::JUMP_START) {
+                SetState(CharState::JUMP_START);
+            }
+        } else {
+            // Falling
+            if (currentState != CharState::FALL) {
+                SetState(CharState::FALL);
+            }
+        }
+    } else {
+        // On the ground: leave JUMP_END once it finishes, then pick walk or idle
+        bool jumpEndDone = (currentState == CharState::JUMP_END &&
+                            animations.count(CharState::JUMP_END) &&
+                            animations[CharState::JUMP_END]->IsFinished());
+
+        if (currentState == CharState::JUMP_START || currentState == CharState::FALL) {
+            // Just landed — play the JUMP_END animation
+            SetState(CharState::JUMP_END);
+        } else if (currentState == CharState::JUMP_END && !jumpEndDone) {
+            // Still playing JUMP_END; let it finish before transitioning
+        } else {
+            // JUMP_END finished, or we were idle/walk — pick walk or idle
+            if (moving) SetState(CharState::WALK);
+            else        SetState(CharState::IDLE);
+        }
+    }
 
     // ---- AIM ----
     // aimTarget is set externally (from gameplay_screen) for player 0 using mouse world coords.

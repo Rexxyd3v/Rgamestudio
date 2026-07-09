@@ -12,6 +12,10 @@
 enum class CharState {
     IDLE,
     WALK,
+    JUMP_START,
+    JUMP_END,
+    FALL,
+    HIT,
     DEATH
 };
 
@@ -29,8 +33,9 @@ public:
     void    SetFaceDirection(int dir) { faceDirection = dir; }
     void    SetAimTarget(Vector2 target) { aimTarget = target; }
     Vector2 GetAimTarget() const { return aimTarget; }
-    void    ResetHealth(float amount) { 
+    void    ResetHealth(float amount) {
         health = amount;
+        healthDisplay = amount;
         currentShootCooldown = 0.0f;
         jumpHeight = 0.0f;
         jumpVelocity = 0.0f;
@@ -112,6 +117,7 @@ protected:
     float      lastHitTimer;
     float      scale;
     float      health;
+    float      healthDisplay; // for smooth health bar
     float      speed;
     float      shootCooldown;
     float      currentShootCooldown;

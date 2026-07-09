@@ -23,9 +23,9 @@ static void PlayWeaponSound(int index) {
     static bool loaded[3] = { false, false, false };
     
     std::string paths[3] = {
-        "assets/weapon1.mp3", // Weapon 1 (SMG)
-        "assets/weapon3.mp3", // Weapon 2 (Shotgun)
-        "assets/weapon2.mp3"  // Weapon 3 (Pistol)
+        "assets/sounds/weapon1.mp3", // Weapon 1 (SMG)
+        "assets/sounds/weapon3.mp3", // Weapon 2 (Shotgun)
+        "assets/sounds/weapon2.mp3"  // Weapon 3 (Pistol)
     };
     
     if (index >= 0 && index < 3) {
@@ -66,7 +66,7 @@ Character::Character(Vector2 startPosition, const std::string& assetPath, float 
       jumpHeight(0.0f), jumpVelocity(0.0f), baseHeight(0.0f), floorHeight(0.0f), weaponRotation(0.0f),
       justShot(false), isMonster(false), kills(0), deaths(0), muzzleFlashTimer(0.0f),
       dashTimer(0.0f), dashCooldown(0.0f), dashDirection{0.0f, 0.0f}, shieldTimer(0.0f), shieldCooldown(0.0f),
-      reloadTimer(0.0f), lastHitTimer(0.0f) {
+      reloadTimer(0.0f), lastHitTimer(0.0f), healthDisplay(100.0f) {
 
     for (int i = 0; i < 3; ++i) {
         ammo[i] = WEAPONS[i].maxAmmo;
@@ -79,7 +79,7 @@ Character::Character(Vector2 startPosition, const std::string& assetPath, float 
     aimTarget = { startPosition.x + 100.0f, startPosition.y };
     velocity  = { 0.0f, 0.0f };
     LoadAnimations(assetPath);
-    
+
     currentWeaponIndex = 0;
     std::string weaponPath = "assets/Free 2D Animated Vector Game Character Sprites/Free 2D Animated Vector Game Character Sprites/Weapons/";
     weaponTextures.push_back(TextureManager::GetTexture(weaponPath + "weaponR1.png"));
@@ -93,13 +93,21 @@ Character::~Character() {
 
 void Character::LoadAnimations(const std::string& baseDir) {
     if (baseDir.find("Enemy 3") != std::string::npos) {
-        animations[CharState::IDLE]  = new Animation(baseDir + "fly_",  6,  0.10f, true);
-        animations[CharState::WALK]  = new Animation(baseDir + "fly_",  6,  0.08f, true);
-        animations[CharState::DEATH] = new Animation(baseDir + "fly_",  6,  0.10f, false);
+        animations[CharState::IDLE]        = new Animation(baseDir + "fly_",      6, 0.10f, true);
+        animations[CharState::WALK]        = new Animation(baseDir + "fly_",      6, 0.08f, true);
+        animations[CharState::JUMP_START]  = new Animation(baseDir + "fly_",      6, 0.10f, false);
+        animations[CharState::JUMP_END]    = new Animation(baseDir + "fly_",      6, 0.10f, false);
+        animations[CharState::FALL]        = new Animation(baseDir + "fly_",      6, 0.10f, true);
+        animations[CharState::HIT]         = new Animation(baseDir + "fly_",      6, 0.10f, false);
+        animations[CharState::DEATH]       = new Animation(baseDir + "fly_",      6, 0.10f, false);
     } else {
-        animations[CharState::IDLE]  = new Animation(baseDir + "idle_",  6,  0.10f, true);
-        animations[CharState::WALK]  = new Animation(baseDir + "walk_",  8,  0.08f, true);
-        animations[CharState::DEATH] = new Animation(baseDir + "death_", 10, 0.10f, false);
+        animations[CharState::IDLE]        = new Animation(baseDir + "idle_",      6, 0.10f, true);
+        animations[CharState::WALK]        = new Animation(baseDir + "walk_",      8, 0.08f, true);
+        animations[CharState::JUMP_START]  = new Animation(baseDir + "jumpStart_", 2, 0.10f, false);
+        animations[CharState::JUMP_END]    = new Animation(baseDir + "jumpEnd_",   3, 0.10f, false);
+        animations[CharState::FALL]        = new Animation(baseDir + "fall_",      5, 0.10f, true);
+        animations[CharState::HIT]         = new Animation(baseDir + "hit_",       3, 0.10f, false);
+        animations[CharState::DEATH]       = new Animation(baseDir + "death_",    10, 0.10f, false);
     }
 }
 
@@ -199,21 +207,21 @@ void Character::Draw() {
     float draw_y = position.y - jumpHeight;
     animations[currentState]->Draw({ position.x, draw_y }, faceDirection, scale);
 
-    // Overhead hit indicator health bar
+    // Overhead hit indicator health bar (with container border)
     if (lastHitTimer > 0.0f && !IsDead()) {
-        float barW = 60.0f;
-        float barH = 6.0f;
-        Vector2 barPos = { position.x - barW / 2.0f, draw_y - 12.0f };
+        const float barWidth = 60.0f;
+        const float barHeight = 6.0f;
+        Vector2 barPos = { position.x - barWidth / 2.0f, draw_y - 12.0f };
         // Background
-        DrawRectangle((int)barPos.x, (int)barPos.y, (int)barW, (int)barH, {60, 60, 60, 200});
-        // Health fill
-        float fillW = barW * (health / 100.0f);
-        if (fillW > 0.0f) {
-            Color barColor = isMonster ? RED : GREEN;
-            DrawRectangle((int)barPos.x, (int)barPos.y, (int)fillW, (int)barH, barColor);
+        DrawRectangle((int)barPos.x, (int)barPos.y, (int)barWidth, (int)barHeight, {60, 60, 60, 200});
+        // Health fill (smoothed)
+        float healthFill = barWidth * (healthDisplay / 100.0f);
+        if (healthFill > 0.0f) {
+            Color healthColor = isMonster ? RED : GREEN;
+            DrawRectangle((int)barPos.x, (int)barPos.y, (int)healthFill, (int)barHeight, healthColor);
         }
         // Outline
-        DrawRectangleLines((int)barPos.x, (int)barPos.y, (int)barW, (int)barH, {200, 200, 200, 230});
+        DrawRectangleLines((int)barPos.x, (int)barPos.y, (int)barWidth, (int)barHeight, {200, 200, 200, 230});
     }
 
     if (shieldTimer > 0.0f) {
@@ -346,6 +354,15 @@ void Character::UpdateSkills(float deltaTime) {
         if (reloadTimer <= 0.0f) {
             ammo[currentWeaponIndex] = WEAPONS[currentWeaponIndex].maxAmmo;
         }
+    }
+
+    // Smooth health display for overhead bar
+    if (healthDisplay != health) {
+        float lerpSpeed = 5.0f; // higher = faster catch-up
+        healthDisplay += (health - healthDisplay) * deltaTime * lerpSpeed;
+        // Clamp
+        if (healthDisplay < 0.0f) healthDisplay = 0.0f;
+        if (healthDisplay > 100.0f) healthDisplay = 100.0f;
     }
 
     // Overhead hit indicator timer tick

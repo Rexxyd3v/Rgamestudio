@@ -18,12 +18,17 @@ public:
 private:
     Font menuFont;
     GameMode selectedMode;
-    
+
     Rectangle btn1Player;
     Rectangle btn2Player;
-    
+
     bool hover1P;
     bool hover2P;
+
+    Music mainMenuMusic;
+    Sound choiceSound;
+
+    bool shouldTransition;
 };
 
 #endif // MAIN_MENU_H

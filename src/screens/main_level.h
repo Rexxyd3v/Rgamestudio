@@ -47,7 +47,11 @@ private:
     Texture2D rockTex;  // rock3
     Texture2D rockTex1; // rock1
     Texture2D rockTex2; // rock2
+    Texture2D healthBarFrames[9];  // Animated health bar: index 0=frame1 (lowest), index 8=frame9 (full)
+    Texture2D dashBarFrames[9];    // Animated dash bar:   index 0=dash1.png (full), index 8=dash9.png (empty)
+    Texture2D headPortrait;        // Character head portrait shown in HUD circle
     float worldTime;    // accumulates delta for animations
+    float lastDashCooldown = 0.0f; // tracks transition 0 -> 2.0 to detect a fresh dash
 
     float spawnTimer;
     float netSendTimer;
@@ -61,7 +65,6 @@ private:
     void  ResolveRockCollisions(Character* c);
     void  CheckCollisions();
     Character* GetNearestEnemy(Vector2 pos);
-    Character* GetNearestPlayerOrCompanion(Vector2 pos);
     Vector2 GetFarSpawnPoint();
     Character* GetNearestTargetForBot(BotEnemy* b);
 };

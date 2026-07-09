@@ -14,7 +14,7 @@
 int main() {
     SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_VSYNC_HINT);
     SetTraceLogLevel(LOG_WARNING); // Suppress INFO logs (texture loading spam = slow startup)
-    InitWindow(VIRTUAL_WIDTH, VIRTUAL_HEIGHT, "RJ - Intro");
+    InitWindow(VIRTUAL_WIDTH, VIRTUAL_HEIGHT, "Soooon");
     InitAudioDevice(); // Initialize audio device
     SetTargetFPS(60);
 

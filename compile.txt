@@ -1,0 +1,3 @@
+
+cd /c/Users/rexje/Rgamestudio
+$ g++ src/*.cpp src/screens/*.cpp src/utils/*.cpp src/entities/*.cpp src/network/*.cpp -o bin/Rgamestudio.exe $(pkg-config --cflags --libs raylib) -lenet -lws2_32

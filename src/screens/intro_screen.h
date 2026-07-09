@@ -27,6 +27,21 @@ private:
     float elapsedTime;
     float fadeOutElapsedTime;
 
+    // Second screen animation
+    Font secondFont;
+    enum SecondScreenState {
+        SECOND_SCREEN_EXPANDING,
+        SECOND_SCREEN_TEXT_WAIT,
+        SECOND_SCREEN_FADING_OUT,
+        SECOND_SCREEN_DONE
+    } secondState;
+
+    float secondTopAndLeft;
+    float secondBottomAndRight;
+    bool secondTextVisible;
+    float secondWaitTimer;
+    float secondFadeAlpha; // 0-255 for black fade
+
 public:
     FirstScreen();
     ~FirstScreen() override;

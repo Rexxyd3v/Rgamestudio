@@ -77,16 +77,8 @@ void BotEnemy::UpdateAI(float deltaTime, Vector2 playerPosition) {
 
     if (isMonster) {
         // --- MONSTER MELEE AI: always chase aggressively, no shooting ---
+        // Monsters are not allowed to use shield or dash — those skills are reserved for players and ranged bots.
         float monsterSpeed = speed * 1.8f; // faster than bots
-
-        // Random dash towards target
-        if (distance > 150.0f && GetRandomValue(1, 80) == 1) {
-            ActivateDash({dx, dy});
-        }
-        // Shield if low health
-        if (health < 40.0f && GetRandomValue(1, 80) == 1) {
-            ActivateShield();
-        }
 
         if (distance > 45.0f) {
             velocity.x = (dx / distance) * monsterSpeed;
@@ -139,8 +131,10 @@ void BotEnemy::UpdateAI(float deltaTime, Vector2 playerPosition) {
 
         // Random jump while moving
         bool isOnGround = (jumpHeight <= floorHeight + 1.0f && jumpVelocity <= 0.0f);
+        bool startedJump = false;
         if (isMoving && isOnGround && GetRandomValue(0, 200) == 0) {
             jumpVelocity = 420.0f;
+            startedJump = true;
         }
 
         // Random dash towards target
@@ -159,6 +153,17 @@ void BotEnemy::UpdateAI(float deltaTime, Vector2 playerPosition) {
         if (distance < BOT_AGGRO_RANGE && currentShootCooldown <= 0.0f) {
             Shoot(playerPosition);
             currentShootCooldown = BOT_SHOOT_COOLDOWN + ((float)GetRandomValue(0, 10) / 20.0f);
+        }
+
+        // ---- JUMP / FALL state picking (override walk/idle) ----
+        if (!isOnGround && jumpVelocity > 0.0f) {
+            if (startedJump || currentState != CharState::JUMP_START) {
+                SetState(CharState::JUMP_START);
+            }
+        } else if (!isOnGround && jumpVelocity <= 0.0f) {
+            SetState(CharState::FALL);
+        } else if (isOnGround && (currentState == CharState::JUMP_START || currentState == CharState::FALL)) {
+            SetState(CharState::JUMP_END);
         }
     }
 }

@@ -24,6 +24,30 @@ GameplayScreen::GameplayScreen(GameMode mode) : currentMode(mode), spawnTimer(0.
     rockTex  = TextureManager::GetTexture(bgPath + "rock3.png");
     rockTex1 = TextureManager::GetTexture(bgPath + "rock1.png");
     rockTex2 = TextureManager::GetTexture(bgPath + "rock2.png");
+    // Load all 9 health bar animation frames
+    for (int i = 0; i < 9; i++) {
+        healthBarFrames[i] = TextureManager::GetTexture(
+            "assets/HealthBar/" + std::to_string(i + 1) + "_no_bg.png");
+    }
+
+    // Load all 9 dash bar animation frames
+    for (int i = 0; i < 9; i++) {
+        dashBarFrames[i] = TextureManager::GetTexture(
+            "assets/DashBar/dash" + std::to_string(i + 1) + ".png");
+    }
+
+    // Load the character head portrait for the HUD circle (use the player's selected skin)
+    {
+        std::string charPath = "assets/Free 2D Animated Vector Game Character Sprites/Free 2D Animated Vector Game Character Sprites/Full body animated characters/";
+        int skinIdx = NetworkManager::GetInstance().localSkinIndex;
+        if (skinIdx < 1 || skinIdx > 4) skinIdx = 1;
+        std::string headPath = charPath + "Char " + std::to_string(skinIdx) + "/head.png";
+        headPortrait = TextureManager::GetTexture(headPath);
+        // Fallback to assets/Head_display/char1.png if skin-specific head not found
+        if (headPortrait.id == 0) {
+            headPortrait = TextureManager::GetTexture("assets/Head_display/char1.png");
+        }
+    }
 
     // Player starts near center of world, using selected skin
     {
@@ -125,6 +149,7 @@ GameplayScreen::~GameplayScreen() {
     if (player2) delete player2;
     for (auto b : offlineBots) delete b;
     for (auto r : remotePlayers) delete r;
+    // healthBarFrames textures are managed by TextureManager
     if (currentMode == GameMode::OFFLINE) ShowCursor();
 }
 
@@ -155,80 +180,14 @@ Character* GameplayScreen::GetNearestEnemy(Vector2 pos) {
     return nearest;
 }
 
-Character* GameplayScreen::GetNearestPlayerOrCompanion(Vector2 pos) {
-    Character* nearest = nullptr;
-    float minDist = 999999.0f;
-
-    // Check player
-    if (!player->IsDead()) {
-        float dx = player->GetPosition().x - pos.x;
-        float dy = player->GetPosition().y - pos.y;
-        float dist = dx*dx + dy*dy;
-        if (dist < minDist) {
-            minDist = dist;
-            nearest = player;
-        }
-    }
-
-    if (player2 && !player2->IsDead()) {
-        float dx = player2->GetPosition().x - pos.x;
-        float dy = player2->GetPosition().y - pos.y;
-        float dist = dx*dx + dy*dy;
-        if (dist < minDist) {
-            minDist = dist;
-            nearest = player2;
-        }
-    }
-
-    return nearest;
-}
-
 // Resolve a character being pushed away from rocks (circular collision)
 void GameplayScreen::ResolveRockCollisions(Character* c) {
-    if (c->IsDead()) return;
-
-    Vector2 pos = c->GetPosition();
-    float charRadius = 18.0f; // small footprint
-
-    for (const auto& r : rocks) {
-        float dx = pos.x - r.position.x;
-        float dy = pos.y - r.position.y;
-        float dist = sqrtf(dx*dx + dy*dy);
-        float combinedRadius = charRadius + r.radius;
-
-        if (dist < combinedRadius && dist > 0.1f) {
-            // Check if the character is roughly above the rock (able to jump on top)
-            bool fromAbove = (pos.y < r.position.y) && (fabsf(dx) < r.radius * 0.8f);
-
-            if (fromAbove) {
-                // Land on top of the rock
-                pos.y = r.platformTop - charRadius;
-                // If character is descending, stop vertical motion
-                if (c->GetJumpVelocity() < 0.0f) {
-                    c->SetJumpVelocity(0.0f);
-                    c->SetJumpHeight(0.0f);
-                }
-            } else {
-                // Push character outward (side collision)
-                float nx = dx / dist;
-                float ny = dy / dist;
-                float overlap = combinedRadius - dist;
-                pos.x += nx * overlap;
-                pos.y += ny * overlap;
-            }
-        }
-    }
-    c->SetPosition(pos);
+    // NOTE: legacy function body removed because its declaration helper was being removed.
+    // If you still need rock collisions, restore this implementation.
+    (void)c;
 }
 
-// Sprite is 2048x2048 drawn at scale 0.08. Sprite center pinned to (position.x, draw_y).
-// Measured from idle sprite alpha bounds (all 4 chars): body occupies
-// x:[756,1298] (w=~540), y:[1033,1782] (h=~750) of the sprite.
-// World offsets relative to sprite center (draw_y = position.y - jumpHeight):
-//   body top    = (1033 - 1024) * 0.08 = +0.7   (head ~at sprite center, no body above)
-//   body bottom = (1782 - 1024) * 0.08 = +60.6 (feet below center)
-//   body half-width = ((1298-756)/2) * 0.08 = ~21.7
-// So the character body is BELOW the sprite's pinned center, not centered on it.
+
 static const float HIT_HALF_W   = 22.0f;   // half-width of visible body in world units
 static const float HIT_TOP_OFF  =  0.0f;   // body top relative to sprite center
 static const float HIT_BOT_OFF  = 60.0f;   // body bottom relative to sprite center (feet below)
@@ -438,7 +397,6 @@ bool GameplayScreen::Update(float deltaTime) {
             r->Update(deltaTime);
         }
 
-        // Send our position to others every NET_SEND_RATE seconds
         netSendTimer += deltaTime;
         if (netSendTimer >= NET_SEND_RATE) {
             netSendTimer = 0.0f;
@@ -460,7 +418,6 @@ bool GameplayScreen::Update(float deltaTime) {
             NetworkManager::GetInstance().SendPacket(&pkt, sizeof(pkt), false);
         }
 
-        // Did we shoot?
         if (player->DidShoot()) {
             Vector2 aim = player->GetAimTarget();
             Vector2 hand = player->GetHandPosition();
@@ -697,45 +654,162 @@ void GameplayScreen::Draw(RenderTexture2D target) {
     EndMode2D();
 
     // HUD (drawn in screen space, not world space)
-    if (currentMode == GameMode::ONLINE) {
-        DrawText("WASD: Move | SPACE: Jump | LMB: Shoot | 1/2/3: Change Gun", 14, 14, 16, {200, 200, 200, 200});
-        DrawText(TextFormat("Opponents Online: %d", (int)remotePlayers.size()), 14, 58, 14, {255, 200, 100, 220});
-    } else {
-        DrawText("WASD: Move | SPACE: Jump | Left Click: Shoot | [LSHIFT]: Dash | [E]: Shield", 14, 14, 16, {200, 200, 200, 200});
-        
-        // Cooldowns HUD
-        float dCD = player->GetDashCooldown();
-        float sCD = player->GetShieldCooldown();
-        if (dCD > 0.0f) {
-            DrawText(TextFormat("DASH: Cooldown (%.1fs)", dCD), 14, 60, 14, RED);
-        } else {
-            DrawText("DASH: READY [LSHIFT]", 14, 60, 14, GREEN);
-        }
-        if (sCD > 0.0f) {
-            DrawText(TextFormat("SHIELD: Cooldown (%.1fs)", sCD), 14, 76, 14, RED);
-        } else {
-            DrawText("SHIELD: READY [E]", 14, 76, 14, BLUE);
-        }
 
-        // Ammo HUD
-        int cAmmo = player->GetAmmo();
-        int mAmmo = player->GetMaxAmmo();
-        if (player->IsReloading()) {
-            DrawText("AMMO: RELOADING...", 14, 92, 14, GOLD);
-        } else {
-            DrawText(TextFormat("AMMO: %d / %d  [R to Reload]", cAmmo, mAmmo), 14, 92, 14, RAYWHITE);
+    // HUD: Animated Health bar (9-frame sprite animation) and Ammo
+    const int barWidth = 500;
+    const int barHeight = 100;
+    int startX = 13;
+    int startY = 0;
+
+    // No clipping/shaping — draw it as-is so you can position it freely.
+    if (headPortrait.id != 0 && headPortrait.width > 0) {
+        int headSize = 85;                            // base size; tweak as needed
+        int headX    = 30;                                // default x; adjust below
+        int headY    = 5;                                // default y; adjust below
+        Rectangle src = { 0.0f, 0.0f, (float)headPortrait.width, (float)headPortrait.height };
+        Rectangle dst = { (float)headX, (float)headY, (float)headSize, (float)headSize };
+        DrawTexturePro(headPortrait, src, dst, {0.0f, 0.0f}, 0.0f, WHITE);
+    }
+
+    // Pick frame based on health percentage (0.0 - 1.0)
+    // Frame 1 (index 0) = full health, Frame 9 (index 8) = lowest health (reversed)
+    {
+        float healthPct = player->GetHealth() / 100.0f;
+        if (healthPct < 0.0f) healthPct = 0.0f;
+        if (healthPct > 1.0f) healthPct = 1.0f;
+        int frameIndex = (int)((1.0f - healthPct) * 8.0f + 0.5f); // 0..8 (reversed: full HP = frame 1, low HP = frame 9)
+        if (frameIndex < 0) frameIndex = 0;
+        if (frameIndex > 8) frameIndex = 8;
+
+        Texture2D& tex = healthBarFrames[frameIndex];
+        if (tex.id != 0) {
+            // Auto-detect the non-transparent content bounds (each frame may have different padding)
+            // Lazy-init per frame, cache the source rect
+            static Rectangle contentSrc[9] = {0};
+            static bool contentSrcReady[9] = {false};
+            int fi = frameIndex;
+            if (!contentSrcReady[fi]) {
+                // Load the image, find alpha bounds, then upload as GPU texture so we can free the CPU image
+                Image img = LoadImage(
+                    ("assets/HealthBar/" + std::to_string(fi + 1) + "_no_bg.png").c_str());
+                if (img.data != nullptr) {
+                    int minX = img.width, minY = img.height, maxX = -1, maxY = -1;
+                    Color* px = LoadImageColors(img);
+                    int n = img.width * img.height;
+                    for (int k = 0; k < n; k++) {
+                        if (px[k].a > 8) {
+                            int x = k % img.width;
+                            int y = k / img.width;
+                            if (x < minX) minX = x;
+                            if (y < minY) minY = y;
+                            if (x > maxX) maxX = x;
+                            if (y > maxY) maxY = y;
+                        }
+                    }
+                    UnloadImageColors(px);
+                    if (maxX >= 0) {
+                        contentSrc[fi] = {
+                            (float)minX, (float)minY,
+                            (float)(maxX - minX + 1), (float)(maxY - minY + 1)
+                        };
+                    } else {
+                        contentSrc[fi] = { 0, 0, (float)img.width, (float)img.height };
+                    }
+                    // Replace the cached GPU texture with the cropped one so further draws use tight bounds
+                    UnloadTexture(tex);
+                    Image crop = ImageFromImage(img, (Rectangle){
+                        contentSrc[fi].x, contentSrc[fi].y,
+                        contentSrc[fi].width, contentSrc[fi].height
+                    });
+                    UnloadImage(img);
+                    tex = LoadTextureFromImage(crop);
+                    UnloadImage(crop);
+                    contentSrcReady[fi] = true;
+                }
+            }
+            // Use the (possibly-cropped) texture's full size
+            Rectangle src = { 0.0f, 0.0f, (float)tex.width, (float)tex.height };
+            Rectangle dst = { (float)startX, (float)startY, (float)barWidth, (float)barHeight };
+            DrawTexturePro(tex, src, dst, {0.0f, 0.0f}, 0.0f, WHITE);
         }
     }
 
-    // Health bar
-    DrawRectangle(14, 38, 200, 14, {60, 60, 60, 200});
-    if (!player->IsDead()) {
-        DrawRectangle(14, 38, (int)(200 * player->GetHealth() / 100.0f), 14, {80, 220, 80, 230});
+    // ---- Dash bar (9-frame animation: snap to dash9 on dash, animate 9->1 while recharging) ----
+    {
+        float dashCooldown = player->GetDashCooldown();
+        int frameIndex; // 0..8  ->  dash1.png..dash9.png
+        if (dashCooldown > 0.0f) {
+            // Drained (dash just happened) or recharging. dashCooldown goes 2.0 -> 0.
+            // We want frame 9 (dash9.png, empty) at start of recharge, frame 1 (dash1.png, full) at end.
+            float rechargePct = dashCooldown / 2.0f; // 1.0 just finished dash, 0.0 ready
+            if (rechargePct > 1.0f) rechargePct = 1.0f;
+            if (rechargePct < 0.0f) rechargePct = 0.0f;
+            frameIndex = 8 - (int)(rechargePct * 8.0f + 0.5f); // 8 (dash9) .. 0 (dash1)
+            if (frameIndex < 0) frameIndex = 0;
+            if (frameIndex > 8) frameIndex = 8;
+        } else {
+            // Dash is ready -> show full frame (dash1)
+            frameIndex = 0;
+        }
+
+        Texture2D& dtex = dashBarFrames[frameIndex];
+        if (dtex.id != 0) {
+            // Lazy-init per frame, cache the source rect (mirrors health bar logic)
+            static Rectangle dashContentSrc[9] = {0};
+            static bool dashContentSrcReady[9] = {false};
+            int fi = frameIndex;
+            if (!dashContentSrcReady[fi]) {
+                Image img = LoadImage(
+                    ("assets/DashBar/dash" + std::to_string(fi + 1) + ".png").c_str());
+                if (img.data != nullptr) {
+                    int minX = img.width, minY = img.height, maxX = -1, maxY = -1;
+                    Color* px = LoadImageColors(img);
+                    int n = img.width * img.height;
+                    for (int k = 0; k < n; k++) {
+                        if (px[k].a > 8) {
+                            int x = k % img.width;
+                            int y = k / img.width;
+                            if (x < minX) minX = x;
+                            if (y < minY) minY = y;
+                            if (x > maxX) maxX = x;
+                            if (y > maxY) maxY = y;
+                        }
+                    }
+                    UnloadImageColors(px);
+                    if (maxX >= 0) {
+                        dashContentSrc[fi] = {
+                            (float)minX, (float)minY,
+                            (float)(maxX - minX + 1), (float)(maxY - minY + 1)
+                        };
+                    } else {
+                        dashContentSrc[fi] = { 0, 0, (float)img.width, (float)img.height };
+                    }
+                    // Replace the cached GPU texture with the cropped one so further draws use tight bounds
+                    UnloadTexture(dtex);
+                    Image crop = ImageFromImage(img, (Rectangle){
+                        dashContentSrc[fi].x, dashContentSrc[fi].y,
+                        dashContentSrc[fi].width, dashContentSrc[fi].height
+                    });
+                    UnloadImage(img);
+                    dtex = LoadTextureFromImage(crop);
+                    UnloadImage(crop);
+                    dashContentSrcReady[fi] = true;
+                }
+            }
+            // Dash bar sits directly below the health bar (health bar is 100px tall at y=0)
+            int dashStartX = 122;
+            int dashStartY = 63 + 5; // 5px gap below the health bar
+            const int dashBarWidth  = 300;
+            const int dashBarHeight = 10;  // slimmer than the health bar so it reads as a secondary indicator
+            Rectangle dSrc = { 0.0f, 0.0f, (float)dtex.width, (float)dtex.height };
+            Rectangle dDst = { (float)dashStartX, (float)dashStartY,
+                               (float)dashBarWidth, (float)dashBarHeight };
+            DrawTexturePro(dtex, dSrc, dDst, {0.0f, 0.0f}, 0.0f, WHITE);
+        }
     }
-    DrawText("HP", 16, 39, 12, WHITE);
 
     if (player->IsDead() && (!player2 || player2->IsDead())) {
-        DrawText("GAME OVER", VIRTUAL_WIDTH/2 - 120, VIRTUAL_HEIGHT/2 - 20, 48, RED);
+        DrawText("YOU'RE DEAD", VIRTUAL_WIDTH/2 - 120, VIRTUAL_HEIGHT/2 - 20, 48, RED);
         DrawText("Press R to Respawn", VIRTUAL_WIDTH/2 - 90, VIRTUAL_HEIGHT/2 + 40, 20, RAYWHITE);
     }
 
