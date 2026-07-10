@@ -22,6 +22,7 @@ public:
     std::string username;
     int kills;
     int deaths;
+    Vector2 lastAimDir; // Last known aiming direction (normalized)
 };
 
 #endif // REMOTE_PLAYER_H

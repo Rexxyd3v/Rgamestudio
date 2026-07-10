@@ -30,20 +30,19 @@ GameplayScreen::GameplayScreen(GameMode mode) : currentMode(mode), spawnTimer(0.
             "assets/HealthBar/" + std::to_string(i + 1) + "_no_bg.png");
     }
 
-    // Load all 9 dash bar animation frames
-    for (int i = 0; i < 9; i++) {
+    // Load all 6 dash bar animation frames
+    for (int i = 0; i < 6; i++) {
         dashBarFrames[i] = TextureManager::GetTexture(
             "assets/DashBar/dash" + std::to_string(i + 1) + ".png");
     }
 
     // Load the character head portrait for the HUD circle (use the player's selected skin)
     {
-        std::string charPath = "assets/Free 2D Animated Vector Game Character Sprites/Free 2D Animated Vector Game Character Sprites/Full body animated characters/";
         int skinIdx = NetworkManager::GetInstance().localSkinIndex;
         if (skinIdx < 1 || skinIdx > 4) skinIdx = 1;
-        std::string headPath = charPath + "Char " + std::to_string(skinIdx) + "/head.png";
+        std::string headPath = "assets/Head_display/char" + std::to_string(skinIdx) + ".png";
         headPortrait = TextureManager::GetTexture(headPath);
-        // Fallback to assets/Head_display/char1.png if skin-specific head not found
+        // Fallback to assets/Head_display/char1.png if not found
         if (headPortrait.id == 0) {
             headPortrait = TextureManager::GetTexture("assets/Head_display/char1.png");
         }
@@ -56,6 +55,7 @@ GameplayScreen::GameplayScreen(GameMode mode) : currentMode(mode), spawnTimer(0.
         if (skinIdx < 1 || skinIdx > 4) skinIdx = 1;
         std::string skinPath = charPath + "Char " + std::to_string(skinIdx) + "/with hands/";
         player = new Player({WORLD_WIDTH / 2.0f - 50.0f, WORLD_HEIGHT / 2.0f}, 0, skinPath);
+        player->SetName(NetworkManager::GetInstance().localUsername.empty() ? "You" : NetworkManager::GetInstance().localUsername);
     }
     // In online mode player2 is a remote player, so we don't spawn them locally
     // player2 is unused now - all opponents come via network as RemotePlayer
@@ -337,13 +337,7 @@ bool GameplayScreen::Update(float deltaTime) {
     }
 
     // Convert mouse screen coords -> world coords using Camera2D
-    Vector2 mouseScreen = GetMousePosition();
-    // Scale mouse from actual screen to virtual screen
-    float scaleX = (float)VIRTUAL_WIDTH  / (float)GetScreenWidth();
-    float scaleY = (float)VIRTUAL_HEIGHT / (float)GetScreenHeight();
-    Vector2 mouseVirtual = { mouseScreen.x * scaleX, mouseScreen.y * scaleY };
-    // Convert virtual screen coords to world coords via camera
-    Vector2 mouseWorld = GetScreenToWorld2D(mouseVirtual, camera);
+    Vector2 mouseWorld = GetScreenToWorld2D(GetMousePosition(), camera);
 
     // Set player aim target in world coordinates
     player->SetAimTarget(mouseWorld);
@@ -734,29 +728,45 @@ void GameplayScreen::Draw(RenderTexture2D target) {
         }
     }
 
-    // ---- Dash bar (9-frame animation: snap to dash9 on dash, animate 9->1 while recharging) ----
+    // ---- Dash bar (6-frame animation) ----
+    // dash1.png = FULL/READY, dash6.png = EMPTY (just dashed)
+    // During the active dash (dashTimer > 0): animate forward dash1 -> dash2 -> ... -> dash6.
+    // During recharge (dashTimer == 0, dashCooldown > 0): animate backward dash6 -> dash5 -> ... -> dash1.
+    // When ready (both 0): show dash1.png.
     {
+        float dashTimer    = player->GetDashTimer();
         float dashCooldown = player->GetDashCooldown();
-        int frameIndex; // 0..8  ->  dash1.png..dash9.png
-        if (dashCooldown > 0.0f) {
-            // Drained (dash just happened) or recharging. dashCooldown goes 2.0 -> 0.
-            // We want frame 9 (dash9.png, empty) at start of recharge, frame 1 (dash1.png, full) at end.
-            float rechargePct = dashCooldown / 2.0f; // 1.0 just finished dash, 0.0 ready
+        const float DASH_ACTIVE_DURATION = 0.15f; // matches Character::ActivateDash
+        const float DASH_MAX_COOLDOWN    = 2.0f;  // matches Character::ActivateDash
+        int frameIndex; // 0..5  ->  dash1.png..dash6.png
+
+        if (dashTimer > 0.0f) {
+            // Active dash: animate forward dash1 (index 0) -> dash6 (index 5)
+            // dashTimer goes 0.15 -> 0, so 1 - timer/duration goes 0 -> 1
+            float activePct = 1.0f - (dashTimer / DASH_ACTIVE_DURATION);
+            if (activePct < 0.0f) activePct = 0.0f;
+            if (activePct > 1.0f) activePct = 1.0f;
+            frameIndex = (int)(activePct * 5.0f + 0.5f); // 0 (dash1) .. 5 (dash6)
+        } else if (dashCooldown > 0.0f) {
+            // Recharge: animate backward dash6 (index 5) -> dash1 (index 0)
+            // dashCooldown goes 2.0 -> 0, so cooldown/duration goes 1 -> 0
+            float rechargePct = dashCooldown / DASH_MAX_COOLDOWN;
             if (rechargePct > 1.0f) rechargePct = 1.0f;
             if (rechargePct < 0.0f) rechargePct = 0.0f;
-            frameIndex = 8 - (int)(rechargePct * 8.0f + 0.5f); // 8 (dash9) .. 0 (dash1)
-            if (frameIndex < 0) frameIndex = 0;
-            if (frameIndex > 8) frameIndex = 8;
+            frameIndex = (int)(rechargePct * 5.0f + 0.5f); // 5 (dash6) .. 0 (dash1)
         } else {
-            // Dash is ready -> show full frame (dash1)
+            // Ready -> show full frame (dash1)
             frameIndex = 0;
         }
+
+        if (frameIndex < 0) frameIndex = 0;
+        if (frameIndex > 5) frameIndex = 5;
 
         Texture2D& dtex = dashBarFrames[frameIndex];
         if (dtex.id != 0) {
             // Lazy-init per frame, cache the source rect (mirrors health bar logic)
-            static Rectangle dashContentSrc[9] = {0};
-            static bool dashContentSrcReady[9] = {false};
+            static Rectangle dashContentSrc[6] = {0};
+            static bool dashContentSrcReady[6] = {false};
             int fi = frameIndex;
             if (!dashContentSrcReady[fi]) {
                 Image img = LoadImage(
@@ -799,7 +809,7 @@ void GameplayScreen::Draw(RenderTexture2D target) {
             // Dash bar sits directly below the health bar (health bar is 100px tall at y=0)
             int dashStartX = 122;
             int dashStartY = 63 + 5; // 5px gap below the health bar
-            const int dashBarWidth  = 300;
+            const int dashBarWidth  = 320;
             const int dashBarHeight = 10;  // slimmer than the health bar so it reads as a secondary indicator
             Rectangle dSrc = { 0.0f, 0.0f, (float)dtex.width, (float)dtex.height };
             Rectangle dDst = { (float)dashStartX, (float)dashStartY,
@@ -950,6 +960,7 @@ void GameplayScreen::PollNetworkEvents(float deltaTime) {
         // accept packets from the host (playerID == 0) because our own ID
         // is not yet known.
         if (!NetworkManager::GetInstance().IsWaitingForAssignment() &&
+            !NetworkManager::GetInstance().IsHost() &&
             header.playerID == myPlayerID) {
             continue;
         }
@@ -960,6 +971,8 @@ void GameplayScreen::PollNetworkEvents(float deltaTime) {
 
             RemotePlayer* rp = FindOrCreateRemotePlayer(pkt.header.playerID, pkt.charSkin);
             rp->username = std::string(pkt.username);
+            // Keep the inherited Character::name in sync so the head-label draw code uses the latest username.
+            rp->SetName(rp->username);
             rp->ApplyNetworkUpdate(pkt.position, pkt.state, pkt.currentWeaponIndex, pkt.faceDirection, pkt.health, pkt.jumpHeight, pkt.jumpVelocity);
 
         } else if (header.type == PacketType::PLAYER_SHOOT && ev.data.size() >= sizeof(PacketPlayerShoot)) {
@@ -968,6 +981,7 @@ void GameplayScreen::PollNetworkEvents(float deltaTime) {
 
             RemotePlayer* rp = FindOrCreateRemotePlayer(pkt.header.playerID, DEFAULT_PLAYER_SKIN);
             rp->SetFaceDirection(pkt.aimDir.x < 0 ? -1 : 1);
+            rp->lastAimDir = pkt.aimDir; // store aim direction for rendering
             rp->ShootInDirection(pkt.aimDir);
 
         } else if (header.type == PacketType::PLAYER_DAMAGE && ev.data.size() >= sizeof(PacketPlayerDamage)) {

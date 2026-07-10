@@ -60,6 +60,7 @@ public:
 
     // Skills
     float GetDashCooldown() const { return dashCooldown; }
+    float GetDashTimer() const { return dashTimer; }
     float GetShieldCooldown() const { return shieldCooldown; }
     bool ActivateDash(Vector2 direction);
     bool ActivateShield();
