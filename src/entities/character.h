@@ -80,6 +80,29 @@ public:
     float GetBaseHeight()    const { return baseHeight; }
     void  SetBaseHeight(float h)   { baseHeight = h; }
 
+    // Depth-sort key: the world Y of the character's feet. Higher Y = drawn
+    // in front; lower Y = drawn behind. Uses the same baseline as Draw()
+    // (position.y - jumpHeight) so the sorted order matches the visual order.
+    virtual float GetDepthY() const { return position.y - jumpHeight + feetOffset; }
+
+    // AABB used for prop collision. Matches the existing projectile hitbox
+    // (HIT_HALF_W / HIT_TOP_OFF / HIT_BOT_OFF) so the character's footprint
+    // is consistent between projectiles and rocks/trees.
+    virtual Rectangle GetCollisionBounds() const {
+        return {
+            position.x - 22.0f,
+            (position.y - jumpHeight) + 0.0f,
+            44.0f,
+            60.0f
+        };
+    }
+
+    // Vertical offset from the sprite center to the feet. Slightly positive
+    // so the depth key matches the bottom of the silhouette, which is what
+    // RPG Maker-style engines use to decide overlap.
+    float GetFeetOffset() const { return feetOffset; }
+    void  SetFeetOffset(float f) { feetOffset = f; }
+
     // floorHeight: 0 = flat ground, >0 = standing on an elevated platform
     float GetFloorHeight() const { return floorHeight; }
     void  SetFloorHeight(float h){ floorHeight = h; }
@@ -127,6 +150,7 @@ protected:
     float   jumpVelocity;  // current vertical velocity
     float   baseHeight;    // (legacy, kept for compatibility)
     float   floorHeight;   // current floor level (0 = ground, rock.visualHeight = platform)
+    float   feetOffset;    // vertical offset from sprite center to the feet, used for depth sort
     Vector2 aimTarget;
     float   weaponRotation;
 

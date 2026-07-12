@@ -17,13 +17,13 @@ static float netSendTimer = 0.0f;
 static const float NET_SEND_RATE = 1.0f / 30.0f; // Send 30 updates per second
 
 GameplayScreen::GameplayScreen(GameMode mode) : currentMode(mode), spawnTimer(0.0f), netSendTimer(0.0f), worldTime(0.0f) {
-    std::string bgPath = "assets/Free 2D Animated Vector Game Character Sprites/Free 2D Animated Vector Game Character Sprites/Environment/";
-    bgTex1   = TextureManager::GetTexture(bgPath + "ground_white.png");
-    bgTex2   = TextureManager::GetTexture(bgPath + "ground2_white.png");
-    bgDetail = TextureManager::GetTexture(bgPath + "ground3_white.png");
-    rockTex  = TextureManager::GetTexture(bgPath + "rock3.png");
-    rockTex1 = TextureManager::GetTexture(bgPath + "rock1.png");
-    rockTex2 = TextureManager::GetTexture(bgPath + "rock2.png");
+    std::string bgPath = "assets/Maps/Beach/";
+    bgTex1   = TextureManager::GetTexture(bgPath + "background.png");
+    bgTex2   = TextureManager::GetTexture(bgPath + "background.png"); // Using same for now
+    bgDetail = TextureManager::GetTexture(bgPath + "background.png"); // Using same for now
+    rockTex  = TextureManager::GetTexture(bgPath + "rocks.png");
+    rockTex1 = TextureManager::GetTexture(bgPath + "rocks.png"); // Using same for now
+    rockTex2 = TextureManager::GetTexture(bgPath + "rocks.png"); // Using same for now
     // Load all 9 health bar animation frames
     for (int i = 0; i < 9; i++) {
         healthBarFrames[i] = TextureManager::GetTexture(
@@ -36,6 +36,10 @@ GameplayScreen::GameplayScreen(GameMode mode) : currentMode(mode), spawnTimer(0.
             "assets/DashBar/dash" + std::to_string(i + 1) + ".png");
     }
 
+    // Load palm tree textures for beach decoration
+    palmTree1 = TextureManager::GetTexture("assets/Maps/Beach/tree1.png");
+    palmTree2 = TextureManager::GetTexture("assets/Maps/Beach/tree2.png");
+
     // Load the character head portrait for the HUD circle (use the player's selected skin)
     {
         int skinIdx = NetworkManager::GetInstance().localSkinIndex;
@@ -47,6 +51,10 @@ GameplayScreen::GameplayScreen(GameMode mode) : currentMode(mode), spawnTimer(0.
             headPortrait = TextureManager::GetTexture("assets/Head_display/char1.png");
         }
     }
+
+    // Load palm tree textures for beach decoration
+    palmTree1 = TextureManager::GetTexture("assets/Maps/Beach/tree1.png");
+    palmTree2 = TextureManager::GetTexture("assets/Maps/Beach/tree2.png");
 
     // Player starts near center of world, using selected skin
     {
@@ -107,32 +115,76 @@ GameplayScreen::GameplayScreen(GameMode mode) : currentMode(mode), spawnTimer(0.
     // Scatter rocks around the world with variety
     rocks = {
         // Rock type 3 (large angular - center areas)
-        {{400.0f,   500.0f},  0.55f, 90.0f,  0.0f},
-        {{900.0f,   900.0f},  0.75f, 120.0f, 0.0f},
-        {{1600.0f,  400.0f},  0.45f, 70.0f,  0.0f},
-        {{2200.0f,  1100.0f}, 0.65f, 105.0f, 0.0f},
-        {{2800.0f,  700.0f},  0.50f, 80.0f,  0.0f},
-        {{3400.0f,  1500.0f}, 0.70f, 112.0f, 0.0f},
-        {{1100.0f,  1600.0f}, 0.45f, 72.0f,  0.0f},
-        {{2600.0f,  350.0f},  0.55f, 88.0f,  0.0f},
-        {{700.0f,   1400.0f}, 0.60f, 96.0f,  0.0f},
-        {{3000.0f,  1700.0f}, 0.40f, 64.0f,  0.0f},
+        {{400.0f,   500.0f},  0.55f, 90.0f,  0.0f, 0.0f, 0, -5.0f,   {220, 210, 190, 255}, 8.0f},
+        {{900.0f,   900.0f},  0.75f, 120.0f, 0.0f, 0.0f, 0,  8.0f,   {210, 200, 180, 255}, 8.0f},
+        {{1600.0f,  400.0f},  0.45f, 70.0f,  0.0f, 0.0f, 0, -12.0f,  {230, 215, 195, 255}, 8.0f},
+        {{2200.0f,  1100.0f}, 0.65f, 105.0f, 0.0f, 0.0f, 0,  6.0f,   {215, 205, 185, 255}, 8.0f},
+        {{2800.0f,  700.0f},  0.50f, 80.0f,  0.0f, 0.0f, 0, -8.0f,   {220, 208, 188, 255}, 8.0f},
+        {{3400.0f,  1500.0f}, 0.70f, 112.0f, 0.0f, 0.0f, 0,  10.0f,  {210, 200, 180, 255}, 8.0f},
+        {{1100.0f,  1600.0f}, 0.45f, 72.0f,  0.0f, 0.0f, 0, -15.0f,  {225, 212, 193, 255}, 8.0f},
+        {{2600.0f,  350.0f},  0.55f, 88.0f,  0.0f, 0.0f, 0,  4.0f,   {215, 203, 183, 255}, 8.0f},
+        {{700.0f,   1400.0f}, 0.60f, 96.0f,  0.0f, 0.0f, 0, -7.0f,   {220, 208, 188, 255}, 8.0f},
+        {{3000.0f,  1700.0f}, 0.40f, 64.0f,  0.0f, 0.0f, 0,  12.0f,  {228, 216, 195, 255}, 8.0f},
         // Extra coverage across large map
-        {{500.0f,  1200.0f},  0.50f, 80.0f,  0.0f},
-        {{1400.0f,  700.0f},  0.45f, 72.0f,  0.0f},
-        {{3200.0f,  500.0f},  0.60f, 95.0f,  0.0f},
+        {{500.0f,  1200.0f},  0.50f, 80.0f,  0.0f, 0.0f, 1, -18.0f,  {200, 190, 170, 255}, 8.0f},
+        {{1400.0f,  700.0f},  0.45f, 72.0f,  0.0f, 0.0f, 1,  14.0f,  {195, 185, 165, 255}, 8.0f},
+        {{3200.0f,  500.0f},  0.60f, 95.0f,  0.0f, 0.0f, 1, -10.0f,  {205, 193, 175, 255}, 8.0f},
         {{1900.0f, 1800.0f},  0.55f, 88.0f,  0.0f},
         {{2400.0f, 1400.0f},  0.40f, 64.0f,  0.0f},
-        {{150.0f,   750.0f},  0.50f, 80.0f,  0.0f},
+        {{150.0f,   750.0f},  0.50f, 80.0f,  0.0f, 0.0f, 2,  5.0f,   {230, 220, 195, 255}, 8.0f},
         {{3700.0f, 1100.0f},  0.65f, 104.0f, 0.0f},
         {{1300.0f, 1200.0f},  0.45f, 72.0f,  0.0f},
         {{3100.0f, 1200.0f},  0.55f, 88.0f,  0.0f},
-        {{2000.0f,  600.0f},  0.40f, 64.0f,  0.0f},
+        {{2000.0f,  600.0f},  0.40f, 64.0f,  0.0f, 0.0f, 2,  7.0f,   {232, 222, 198, 255}, 8.0f},
     };
     // Set platformTop: approximate top Y of each rock so characters can stand on it
     for (auto& r : rocks) {
         // rock texture center is at position; top surface is about radius above center
         r.platformTop = r.position.y - r.radius * 0.8f;
+        // Cache the texture pointer + dimensions for fast Draw/CollisionBounds.
+        Texture2D* t = (r.type == 1) ? &rockTex1 : (r.type == 2) ? &rockTex2 : &rockTex;
+        r.tex  = t;
+        r.texW = (float)t->width;
+        r.texH = (float)t->height;
+    }
+
+    // Palm trees: replaces the old local palmTrees[] array inside Draw().
+    // We keep the same world positions + scales so the layout is unchanged.
+    // The trunk-height values are tuned to the existing palm sprites - the
+    // bottom ~25% of the texture is the visible trunk.
+    {
+        struct PalmTreeInit {
+            Vector2 position;
+            float   scale;
+            int     type;     // 0 -> palmTree1, 1 -> palmTree2
+            float   trunkH;   // source pixels at the bottom of the texture that are trunk
+            float   trunkW;   // trunk width as a fraction of texture width (centered)
+        };
+        const PalmTreeInit palmInits[] = {
+            {{500.0f,  800.0f},  0.6f,  0, 110.0f, 0.30f},
+            {{3500.0f, 700.0f},  0.7f,  1, 110.0f, 0.30f},
+            {{800.0f,  1500.0f}, 0.5f,  0, 110.0f, 0.30f},
+            {{3200.0f, 1300.0f}, 0.6f,  1, 110.0f, 0.30f},
+            {{1500.0f, 300.0f},  0.55f, 0, 110.0f, 0.30f},
+            {{1500.0f, 1700.0f}, 0.65f, 1, 110.0f, 0.30f},
+        };
+        trees.clear();
+        for (const auto& init : palmInits) {
+            Tree t{};
+            t.position       = init.position;
+            t.scale          = init.scale;
+            t.type           = init.type;
+            t.trunkHeightPx  = init.trunkH;
+            t.trunkWidthFrac = init.trunkW;
+            Texture2D* tex = (init.type == 0) ? &palmTree1 : &palmTree2;
+            t.tex = tex;
+            t.texW = (float)tex->width;
+            t.texH = (float)tex->height;
+            t.trunkHeight  = t.texH * t.scale;
+            t.trunkWidth   = t.texW * t.scale * t.trunkWidthFrac;
+            t.trunkOffsetX = (t.texW * t.scale - t.trunkWidth) * 0.5f;
+            trees.push_back(t);
+        }
     }
 
     if (currentMode == GameMode::OFFLINE) HideCursor();
@@ -180,12 +232,81 @@ Character* GameplayScreen::GetNearestEnemy(Vector2 pos) {
     return nearest;
 }
 
-// Resolve a character being pushed away from rocks (circular collision)
-void GameplayScreen::ResolveRockCollisions(Character* c) {
-    // NOTE: legacy function body removed because its declaration helper was being removed.
-    // If you still need rock collisions, restore this implementation.
-    (void)c;
+// Trunk-only tree collision + rock collision (AABB vs AABB)
+void GameplayScreen::ResolveWorldCollision(Character* c) {
+    if (!c) return;
+
+    // Try to resolve by reverting movement if the *new* position intersects
+    // any solid world collider.
+    Rectangle cb = c->GetCollisionBounds();
+
+    // Trees: trunk only (leaves are non-solid)
+    for (const auto& t : trees) {
+        Rectangle tb = t.TrunkBounds();
+        if (CheckCollisionRecs(cb, tb)) {
+            // Cancel movement by reverting position on both axes.
+            // Assumes Character movement already applied; we simply back out
+            // the last displacement by using the previous position stored in
+            // UpdatePhysics-driven logic is not available here.
+            //
+            // Current Character implementations directly mutate `position`.
+            // To cancel correctly we must undo the last move from inside
+            // Character. For now: approximate by pushing character out minimally
+            // along the smallest overlap axis.
+
+            float overlapLeft   = cb.x + cb.width  - tb.x;
+            float overlapRight  = (tb.x + tb.width) - cb.x;
+            float overlapTop    = cb.y + cb.height - tb.y;
+            float overlapBottom = (tb.y + tb.height) - cb.y;
+
+            // Choose the axis with least penetration to separate.
+            bool separateX = (std::min(overlapLeft, overlapRight) < std::min(overlapTop, overlapBottom));
+            if (separateX) {
+                if (overlapLeft < overlapRight) {
+                    c->SetPosition({ c->GetPosition().x - overlapLeft, c->GetPosition().y });
+                } else {
+                    c->SetPosition({ c->GetPosition().x + overlapRight, c->GetPosition().y });
+                }
+            } else {
+                if (overlapTop < overlapBottom) {
+                    c->SetPosition({ c->GetPosition().x, c->GetPosition().y - overlapTop });
+                } else {
+                    c->SetPosition({ c->GetPosition().x, c->GetPosition().y + overlapBottom });
+                }
+            }
+
+            cb = c->GetCollisionBounds();
+        }
+    }
+
+    // Rocks: solid
+    for (const auto& r : rocks) {
+        Rectangle rb = r.CollisionBounds();
+        if (CheckCollisionRecs(cb, rb)) {
+            float overlapLeft   = cb.x + cb.width  - rb.x;
+            float overlapRight  = (rb.x + rb.width) - cb.x;
+            float overlapTop    = cb.y + cb.height - rb.y;
+            float overlapBottom = (rb.y + rb.height) - cb.y;
+
+            bool separateX = (std::min(overlapLeft, overlapRight) < std::min(overlapTop, overlapBottom));
+            if (separateX) {
+                if (overlapLeft < overlapRight) {
+                    c->SetPosition({ c->GetPosition().x - overlapLeft, c->GetPosition().y });
+                } else {
+                    c->SetPosition({ c->GetPosition().x + overlapRight, c->GetPosition().y });
+                }
+            } else {
+                if (overlapTop < overlapBottom) {
+                    c->SetPosition({ c->GetPosition().x, c->GetPosition().y - overlapTop });
+                } else {
+                    c->SetPosition({ c->GetPosition().x, c->GetPosition().y + overlapBottom });
+                }
+            }
+            cb = c->GetCollisionBounds();
+        }
+    }
 }
+
 
 
 static const float HIT_HALF_W   = 22.0f;   // half-width of visible body in world units
@@ -343,7 +464,8 @@ bool GameplayScreen::Update(float deltaTime) {
     player->SetAimTarget(mouseWorld);
 
     player->Update(deltaTime);
-    ResolveRockCollisions(player);
+    ResolveWorldCollision(player);
+
 
     if (player2) {
         // Simple auto-aim for player 2
@@ -352,7 +474,8 @@ bool GameplayScreen::Update(float deltaTime) {
             player2->SetAimTarget(nearestEnemy->GetPosition());
         }
         player2->Update(deltaTime);
-        ResolveRockCollisions(player2);
+        ResolveWorldCollision(player2);
+
     }
 
     // Update bots in offline mode
@@ -365,7 +488,8 @@ bool GameplayScreen::Update(float deltaTime) {
                 b->UpdateAI(deltaTime, b->GetPosition());
             }
             b->Update(deltaTime);
-            ResolveRockCollisions(b);
+            ResolveWorldCollision(b);
+
 
             if (b->ShouldRespawn()) {
                 Vector2 spawnPos = GetFarSpawnPoint();
@@ -479,12 +603,12 @@ void GameplayScreen::Draw(RenderTexture2D target) {
         DrawRectangle(0, strip, WORLD_WIDTH, 80, {r, g, b, 255});
     }
 
-    // ---- LAYER 1: Tiled base ground (warm olive-green tint) ----
+    // ---- LAYER 1: Tiled base ground (beach sand) ----
     if (bgTex1.id != 0 && bgTex1.width > 0) {
         int cols = (int)(WORLD_WIDTH  / bgTex1.width)  + 2;
         int rows = (int)(WORLD_HEIGHT / bgTex1.height) + 2;
-        // Warm mossy green tint for ground
-        Color groundTint = {72, 88, 55, 255};
+        // Draw background without tint to preserve original colors
+        Color groundTint = WHITE;
         for (int y = 0; y < rows; ++y) {
             for (int x = 0; x < cols; ++x) {
                 DrawTexture(bgTex1, x * bgTex1.width, y * bgTex1.height, groundTint);
@@ -492,11 +616,12 @@ void GameplayScreen::Draw(RenderTexture2D target) {
         }
     }
 
-    // ---- LAYER 2: Pebble/detail overlay (slightly darker, partial opacity) ----
+    // ---- LAYER 2: Sand/detail overlay (disabled to use background as-is) ----
     if (bgTex2.id != 0 && bgTex2.width > 0) {
         int cols = (int)(WORLD_WIDTH  / bgTex2.width)  + 2;
         int rows = (int)(WORLD_HEIGHT / bgTex2.height) + 2;
-        Color detailTint = {55, 70, 40, 120};
+        // Disabled to use background as-is - fully transparent
+        Color detailTint = {255, 255, 255, 0};
         for (int y = 0; y < rows; ++y) {
             for (int x = 0; x < cols; ++x) {
                 DrawTexture(bgTex2, x * bgTex2.width, y * bgTex2.height, detailTint);
@@ -505,56 +630,56 @@ void GameplayScreen::Draw(RenderTexture2D target) {
     }
 
     // ---- LAYER 3: Zone border highlights ----
-    // Outer danger border glow (red zone edges)
+    // Outer danger border glow (deep water edges)
     int borderW = 80;
-    Color borderDanger = {180, 30, 30, 60};
+    Color borderDanger = {0, 50, 100, 60}; // Deep blue for dangerous deep water
     DrawRectangle(0, 0, WORLD_WIDTH, borderW, borderDanger);                       // top
     DrawRectangle(0, WORLD_HEIGHT - borderW, WORLD_WIDTH, borderW, borderDanger); // bottom
     DrawRectangle(0, 0, borderW, WORLD_HEIGHT, borderDanger);                     // left
     DrawRectangle(WORLD_WIDTH - borderW, 0, borderW, WORLD_HEIGHT, borderDanger); // right
-    // Inner border line (bright orange-red outline)
-    Color borderLine = {220, 80, 30, 100};
+    // Inner border line (dangerous reef/rock outline)
+    Color borderLine = {0, 100, 150, 100}; // Darker blue for reef/rocks
     int lineThk = 4;
     DrawRectangle(borderW, borderW, WORLD_WIDTH - borderW*2, lineThk, borderLine);
     DrawRectangle(borderW, WORLD_HEIGHT - borderW - lineThk, WORLD_WIDTH - borderW*2, lineThk, borderLine);
     DrawRectangle(borderW, borderW, lineThk, WORLD_HEIGHT - borderW*2, borderLine);
     DrawRectangle(WORLD_WIDTH - borderW - lineThk, borderW, lineThk, WORLD_HEIGHT - borderW*2, borderLine);
 
-    // ---- LAYER 4: Animated ambient glow pools on ground ----
-    struct GlowPool { float x, y, radius; Color col; };
-    GlowPool glowPools[] = {
-        { WORLD_WIDTH  * 0.5f,  WORLD_HEIGHT * 0.5f,  260.0f, {80,  200, 120,  0} }, // center green
-        { WORLD_WIDTH  * 0.15f, WORLD_HEIGHT * 0.2f,  160.0f, {60,  100, 200,  0} }, // top-left blue
-        { WORLD_WIDTH  * 0.85f, WORLD_HEIGHT * 0.2f,  160.0f, {200, 80,  60,   0} }, // top-right red
-        { WORLD_WIDTH  * 0.15f, WORLD_HEIGHT * 0.8f,  160.0f, {200, 170, 40,   0} }, // bot-left gold
-        { WORLD_WIDTH  * 0.85f, WORLD_HEIGHT * 0.8f,  160.0f, {120, 60,  200,  0} }, // bot-right purple
-        { WORLD_WIDTH  * 0.5f,  WORLD_HEIGHT * 0.2f,  130.0f, {40,  180, 200,  0} }, // top-center cyan
-        { WORLD_WIDTH  * 0.5f,  WORLD_HEIGHT * 0.8f,  130.0f, {200, 100, 160,  0} }, // bot-center pink
-    };
-    float pulse = 0.5f + 0.5f * sinf(worldTime * 1.2f);
-    for (auto& gp : glowPools) {
-        unsigned char alpha = (unsigned char)(25 + pulse * 30);
-        Color c = { gp.col.r, gp.col.g, gp.col.b, alpha };
-        // Outer glow (large, very transparent)
-        DrawCircle((int)gp.x, (int)gp.y, gp.radius * 1.8f, { c.r, c.g, c.b, (unsigned char)(alpha / 3) });
-        // Inner glow (smaller, more opaque)
-        DrawCircle((int)gp.x, (int)gp.y, gp.radius, c);
-        // Core bright center
-        DrawCircle((int)gp.x, (int)gp.y, gp.radius * 0.3f, { c.r, c.g, c.b, (unsigned char)(alpha * 2 < 255 ? alpha * 2 : 255) });
-    }
+    // ---- LAYER 4: Animated ambient glow pools on ground (REMOVED for beach map) ----
+    // struct GlowPool { float x, y, radius; Color col; };
+    // GlowPool glowPools[] = {
+    //     { WORLD_WIDTH  * 0.5f,  WORLD_HEIGHT * 0.5f,  260.0f, {64, 164, 223, 0} }, // center - ocean blue
+    //     { WORLD_WIDTH  * 0.15f, WORLD_HEIGHT * 0.2f,  160.0f, {0, 100, 0, 0} }, // top-left - dark green (palm trees)
+    //     { WORLD_WIDTH  * 0.85f, WORLD_HEIGHT * 0.2f,  160.0f, {255, 69, 0,   0} }, // top-right - orange-red (sunset)
+    //     { WORLD_WIDTH  * 0.15f, WORLD_HEIGHT * 0.8f,  160.0f, {255, 215, 0,   0} }, // bot-left - gold (sun)
+    //     { WORLD_WIDTH  * 0.85f, WORLD_HEIGHT * 0.8f,  160.0f, {138, 43, 226,  0} }, // bot-right - purple (twilight)
+    //     { WORLD_WIDTH  * 0.5f,  WORLD_HEIGHT * 0.2f,  130.0f, {0, 191, 255,  0} }, // top-center - deep sky blue
+    //     { WORLD_WIDTH  * 0.5f,  WORLD_HEIGHT * 0.8f,  130.0f, {255, 182, 193,  0} }, // bot-center - light pink
+    // };
+    // float pulse = 0.5f + 0.5f * sinf(worldTime * 1.2f);
+    // for (auto& gp : glowPools) {
+    //     unsigned char alpha = (unsigned char)(25 + pulse * 30);
+    //     Color c = { gp.col.r, gp.col.g, gp.col.b, alpha };
+    //     // Outer glow (large, very transparent)
+    //     DrawCircle((int)gp.x, (int)gp.y, gp.radius * 1.8f, { c.r, c.g, c.b, (unsigned char)(alpha / 3) });
+    //     // Inner glow (smaller, more opaque)
+    //     DrawCircle((int)gp.x, (int)gp.y, gp.radius, c);
+    //     // Core bright center
+    //     DrawCircle((int)gp.x, (int)gp.y, gp.radius * 0.3f, { c.r, c.g, c.b, (unsigned char)(alpha * 2 < 255 ? alpha * 2 : 255) });
+    // }
 
-    // ---- LAYER 5: Ground patch accents (darker moss patches) ----
+    // ---- LAYER 5: Ground patch accents (disabled to use background as-is) ----
     if (bgDetail.id != 0) {
         struct Patch { float x, y, sc; Color col; };
         Patch patches[] = {
-            { 600.0f,  800.0f,  2.5f, {50,  75,  35,  120} },
-            { 1800.0f, 500.0f,  2.0f, {60,  90,  40,  100} },
-            { 2500.0f, 1300.0f, 3.0f, {45,  65,  30,  110} },
-            { 3200.0f, 900.0f,  2.2f, {55,  80,  38,  100} },
-            { 1200.0f, 1700.0f, 2.8f, {50,  72,  33,  110} },
-            { 800.0f,  300.0f,  1.8f, {65,  95,  45,  90}  },
-            { 3600.0f, 400.0f,  2.0f, {48,  68,  32,  100} },
-            { 400.0f,  1700.0f, 2.3f, {55,  78,  36,  105} },
+            { 600.0f,  800.0f,  2.5f, {180, 160, 120, 0} },
+            { 1800.0f, 500.0f,  2.0f, {170, 150, 110, 0} },
+            { 2500.0f, 1300.0f, 3.0f, {160, 140, 100, 0} },
+            { 3200.0f, 900.0f,  2.2f, {175, 155, 115, 0} },
+            { 1200.0f, 1700.0f, 2.8f, {165, 145, 105, 0} },
+            { 800.0f,  300.0f,  1.8f, {185, 165, 125, 0}  },
+            { 3600.0f, 400.0f,  2.0f, {155, 135,  95, 0} },
+            { 400.0f,  1700.0f, 2.3f, {170, 150, 110, 0} },
         };
         for (auto& p : patches) {
             float w = bgDetail.width  * p.sc;
@@ -566,86 +691,88 @@ void GameplayScreen::Draw(RenderTexture2D target) {
         }
     }
 
-    // ---- LAYER 6: Rock shadows (drawn before rocks) ----
-    struct RockDraw {
-        Vector2 pos;
-        float scale;
-        int type; // 0=rock3, 1=rock1, 2=rock2
-        float rotation;
-        Color tint;
-    };
-    // 20 rocks: first 10 use rockTex (rock3), next 5 rock1, next 5 rock2
-    RockDraw rockDrawList[] = {
-        // rock3 (angular cracked boulders) - tinted warm grey/brown
-        { {400.0f,   500.0f},  0.55f, 0, -5.0f,   {200, 190, 175, 255} },
-        { {900.0f,   900.0f},  0.75f, 0,  8.0f,   {185, 175, 160, 255} },
-        { {1600.0f,  400.0f},  0.45f, 0, -12.0f,  {210, 195, 180, 255} },
-        { {2200.0f,  1100.0f}, 0.65f, 0,  6.0f,   {195, 185, 168, 255} },
-        { {2800.0f,  700.0f},  0.50f, 0, -8.0f,   {200, 188, 172, 255} },
-        { {3400.0f,  1500.0f}, 0.70f, 0,  10.0f,  {190, 180, 165, 255} },
-        { {1100.0f,  1600.0f}, 0.45f, 0, -15.0f,  {205, 192, 178, 255} },
-        { {2600.0f,  350.0f},  0.55f, 0,  4.0f,   {195, 183, 168, 255} },
-        { {700.0f,   1400.0f}, 0.60f, 0, -7.0f,   {200, 188, 172, 255} },
-        { {3000.0f,  1700.0f}, 0.40f, 0,  12.0f,  {208, 196, 180, 255} },
-        // rock1 (flat cracked slabs) - slightly cool blue-grey
-        { {500.0f,  1200.0f},  0.50f, 1, -18.0f,  {175, 185, 195, 255} },
-        { {1400.0f,  700.0f},  0.45f, 1,  14.0f,  {170, 180, 190, 255} },
-        { {3200.0f,  500.0f},  0.60f, 1, -10.0f,  {180, 188, 200, 255} },
-        { {1900.0f, 1800.0f},  0.55f, 1,  20.0f,  {172, 182, 192, 255} },
-        { {2400.0f, 1400.0f},  0.40f, 1, -22.0f,  {178, 186, 198, 255} },
-        // rock2 (rounded boulders) - warm earthy tan
-        { {150.0f,   750.0f},  0.50f, 2,  5.0f,   {210, 200, 175, 255} },
-        { {3700.0f, 1100.0f},  0.65f, 2, -9.0f,   {205, 195, 170, 255} },
-        { {1300.0f, 1200.0f},  0.45f, 2,  16.0f,  {215, 205, 180, 255} },
-        { {3100.0f, 1200.0f},  0.55f, 2, -14.0f,  {208, 198, 173, 255} },
-        { {2000.0f,  600.0f},  0.40f, 2,  7.0f,   {212, 202, 178, 255} },
-    };
+    // ---- LAYER 6: Depth-sorted world objects (rocks, trees, characters) ----
+    std::vector<RenderItem> renderables;
 
-    // Draw rock shadows first
-    for (auto& rd : rockDrawList) {
-        Texture2D tex = (rd.type == 1) ? rockTex1 : (rd.type == 2) ? rockTex2 : rockTex;
-        if (tex.id == 0) continue;
-        float w = tex.width  * rd.scale * 1.1f;
-        float h = tex.height * rd.scale * 0.4f;
-        Vector2 orig = { w / 2.0f, 0.0f };
-        Rectangle src = { 0, 0, (float)tex.width, (float)tex.height };
-        Rectangle dst = { rd.pos.x + 12, rd.pos.y + 18, w, h };
-        DrawTexturePro(tex, src, dst, orig, rd.rotation * 0.5f, {0, 0, 0, 50});
+    // Trees
+    for (const auto& t : trees) {
+        RenderItem it;
+        it.depthY = t.GetDepthY();
+        it.draw = [&t]() {
+            if (!t.tex || t.tex->id == 0) return;
+            float w = t.tex->width * t.scale;
+            float h = t.tex->height * t.scale;
+            Vector2 orig = { w / 2.0f, h / 2.0f };
+            Rectangle src = { 0, 0, (float)t.tex->width, (float)t.tex->height };
+            Rectangle dst = { t.position.x, t.position.y, w, h };
+            DrawTexturePro(*t.tex, src, dst, orig, 0.0f, WHITE);
+        };
+        renderables.push_back(it);
     }
 
-    // Draw rocks with tints and rotations
-    for (auto& rd : rockDrawList) {
-        Texture2D tex = (rd.type == 1) ? rockTex1 : (rd.type == 2) ? rockTex2 : rockTex;
-        if (tex.id == 0) continue;
-        float w = tex.width  * rd.scale;
-        float h = tex.height * rd.scale;
-        Vector2 orig = { w / 2.0f, h / 2.0f };
-        Rectangle src = { 0, 0, (float)tex.width, (float)tex.height };
-        Rectangle dst = { rd.pos.x, rd.pos.y, w, h };
-        DrawTexturePro(tex, src, dst, orig, rd.rotation, rd.tint);
+    // Rocks
+    for (const auto& r : rocks) {
+        RenderItem it;
+        it.depthY = r.GetDepthY();
+        it.draw = [&r]() {
+            if (!r.tex || r.tex->id == 0) return;
+
+            // shadow
+            float wS = r.tex->width * r.scale * 1.1f;
+            float hS = r.tex->height * r.scale * 0.4f;
+            Vector2 origS = { wS / 2.0f, 0.0f };
+            Rectangle srcS = { 0, 0, (float)r.tex->width, (float)r.tex->height };
+            Rectangle dstS = { r.position.x + 6, r.position.y + 9, wS, hS };
+            DrawTexturePro(*r.tex, srcS, dstS, origS, r.rotation * 0.5f, {0,0,0,50});
+
+            // rock sprite
+            float w = r.tex->width  * r.scale;
+            float h = r.tex->height * r.scale;
+            Vector2 orig = { w / 2.0f, h / 2.0f };
+            Rectangle src = { 0, 0, (float)r.tex->width, (float)r.tex->height };
+            Rectangle dst = { r.position.x, r.position.y, w, h };
+            DrawTexturePro(*r.tex, src, dst, orig, r.rotation, r.tint);
+        };
+        renderables.push_back(it);
     }
 
-    // Depth-sort all characters by Y position
-    std::vector<Character*> allChars;
-    allChars.push_back(player);
-    if (player2) allChars.push_back(player2);
-    for (auto r : remotePlayers) allChars.push_back(r);  // Online opponents
-    for (auto b : offlineBots) allChars.push_back(b);    // Offline opponents
-
-    // Sort characters by Y using a simple manual sort instead of a lambda to be beginner-friendly
-    for (int i = 0; i < allChars.size(); i++) {
-        for (int j = i + 1; j < allChars.size(); j++) {
-            if (allChars[i]->GetPosition().y > allChars[j]->GetPosition().y) {
-                Character* temp = allChars[i];
-                allChars[i] = allChars[j];
-                allChars[j] = temp;
-            }
-        }
+    // Characters (player, remote, bots)
+    {
+        RenderItem it;
+        it.depthY = player->GetDepthY();
+        it.draw = [this]() { player->Draw(); };
+        renderables.push_back(it);
+    }
+    if (player2) {
+        RenderItem it;
+        it.depthY = player2->GetDepthY();
+        it.draw = [this]() { if (player2) player2->Draw(); };
+        renderables.push_back(it);
+    }
+    for (auto* rp : remotePlayers) {
+        RenderItem it;
+        it.depthY = rp->GetDepthY();
+        it.draw = [rp]() { rp->Draw(); };
+        renderables.push_back(it);
+    }
+    for (auto* b : offlineBots) {
+        RenderItem it;
+        it.depthY = b->GetDepthY();
+        it.draw = [b]() { b->Draw(); };
+        renderables.push_back(it);
     }
 
-    for (auto c : allChars) c->Draw();
+    std::sort(renderables.begin(), renderables.end(), [](const RenderItem& a, const RenderItem& b) {
+        return a.depthY < b.depthY;
+    });
+
+    for (auto& it : renderables) {
+        it.draw();
+    }
+
 
     EndMode2D();
+
 
     // HUD (drawn in screen space, not world space)
 

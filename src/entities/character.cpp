@@ -63,7 +63,7 @@ static void PlayWeaponSound(int index) {
 Character::Character(Vector2 startPosition, const std::string& assetPath, float scale)
     : position(startPosition), faceDirection(1), currentState(CharState::IDLE),
       scale(scale), health(100.0f), speed(150.0f), shootCooldown(0.15f), currentShootCooldown(0.0f),
-      jumpHeight(0.0f), jumpVelocity(0.0f), baseHeight(0.0f), floorHeight(0.0f), weaponRotation(0.0f),
+      jumpHeight(0.0f), jumpVelocity(0.0f), baseHeight(0.0f), floorHeight(0.0f), feetOffset(10.0f), weaponRotation(0.0f),
       justShot(false), isMonster(false), kills(0), deaths(0), muzzleFlashTimer(0.0f),
       dashTimer(0.0f), dashCooldown(0.0f), dashDirection{0.0f, 0.0f}, shieldTimer(0.0f), shieldCooldown(0.0f),
       reloadTimer(0.0f), lastHitTimer(0.0f), healthDisplay(100.0f) {
