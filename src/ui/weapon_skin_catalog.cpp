@@ -100,3 +100,11 @@ std::vector<Ui::GalleryItem> GetWeaponSkinGalleryItems() {
     }
     return items;
 }
+
+int GetWeaponRenderFileNumber(int slot) {
+    switch (slot) {
+        case 1: return 3; // Shotgun slot -> weaponR3.png
+        case 2: return 2; // Pistol slot  -> weaponR2.png
+        default: return slot + 1; // SMG (slot 0) -> weaponR1.png
+    }
+}

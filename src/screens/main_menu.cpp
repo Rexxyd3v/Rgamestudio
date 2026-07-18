@@ -111,20 +111,27 @@ void MainMenuScreen::Draw(RenderTexture2D target) {
     float brandAlpha = visibleAlpha * uiRise;
 
     // Left brand column
-    DrawTextEx(menuFont, "SOOOON",
-               { 72.0f, 180.0f + risePx },
-               72.0f, 1.0f, Fade(UiTheme::TextPrimary(), brandAlpha));
+    float titleFontSize = 92.0f;
+    float titleSpacing = 4.0f;
+    const char* titleText = "VANTA";
+    Vector2 titleSize = MeasureTextEx(menuFont, titleText, titleFontSize, titleSpacing);
 
-    DrawRectangle(74, (int)(268 + risePx), 120, 3,
+    DrawTextEx(menuFont, titleText,
+               { 72.0f, 170.0f + risePx },
+               titleFontSize, titleSpacing, Fade(UiTheme::TextPrimary(), brandAlpha));
+
+    // Underline now matches the measured width of the title text (plus a small margin)
+    DrawRectangle(74, (int)(170.0f + titleSize.y + 6.0f + risePx),
+                  (int)titleSize.x, 4,
                   Fade(UiTheme::AccentGold(), brandAlpha));
 
-    DrawTextEx(menuFont, "The ultimate coastal brawler. Step into the arena.",
-               { 74.0f, 290.0f + risePx },
+    DrawTextEx(menuFont, "No mercy. No cover. Only the fast survive.",
+               { 74.0f, 170.0f + titleSize.y + 26.0f + risePx },
                18.0f, 1.0f, Fade(UiTheme::TextMuted(), brandAlpha));
 
     DrawTextEx(menuFont, "MAIN MENU",
-               { 74.0f, 340.0f + risePx },
-               16.0f, 1.0f, Fade(UiTheme::AccentGold(), brandAlpha * 0.85f));
+               { 74.0f, 170.0f + titleSize.y + 66.0f + risePx },
+               16.0f, 2.0f, Fade(UiTheme::AccentGold(), brandAlpha * 0.85f));
 
     // Right mode cards
     Rectangle off = cardOffline;
@@ -132,7 +139,7 @@ void MainMenuScreen::Draw(RenderTexture2D target) {
     off.y += risePx;
     on.y  += risePx;
 
-    Ui::DrawModeCard(off, menuFont, "OFFLINE", "Solo arena  -  fight bots on the beach", hoverOffline);
+    Ui::DrawModeCard(off, menuFont, "OFFLINE", "Solo arena  -  fight the bots", hoverOffline);
     Ui::DrawModeCard(on,  menuFont, "ONLINE",  "Host or join  -  play with friends", hoverOnline);
 
     EndTextureMode();

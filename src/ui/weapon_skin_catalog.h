@@ -32,4 +32,10 @@ Color GetWeaponSkinTint(int skinId);
 // Returns a vector of GalleryItem for the select gallery.
 std::vector<Ui::GalleryItem> GetWeaponSkinGalleryItems();
 
+// Returns the correct weaponR<N>.png file number for a given weapon slot
+// (0 = SMG, 1 = Shotgun, 2 = Pistol). Exists because the Shotgun/Pistol
+// default sprite files were swapped at the asset level (weaponR2.png
+// contains pistol art, weaponR3.png contains shotgun art).
+int GetWeaponRenderFileNumber(int slot);
+
 #endif // WEAPON_SKIN_CATALOG_H

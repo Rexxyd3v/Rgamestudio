@@ -22,9 +22,12 @@ WeaponSkinPreview::WeaponSkinPreview(int skinId)
         // Fallback to default skin if invalid
         skinPrefix = "assets/WeaponSkins/Default/";
     }
-    weaponTextures.push_back(TextureManager::GetTexture(skinPrefix + "weaponR1.png"));
-    weaponTextures.push_back(TextureManager::GetTexture(skinPrefix + "weaponR2.png"));
-    weaponTextures.push_back(TextureManager::GetTexture(skinPrefix + "weaponR3.png"));
+    int fileNumber0 = (skinId == 0) ? GetWeaponRenderFileNumber(0) : 0 + 1;
+    int fileNumber1 = (skinId == 0) ? GetWeaponRenderFileNumber(1) : 1 + 1;
+    int fileNumber2 = (skinId == 0) ? GetWeaponRenderFileNumber(2) : 2 + 1;
+    weaponTextures.push_back(TextureManager::GetTexture(skinPrefix + "weaponR" + std::to_string(fileNumber0) + ".png"));
+    weaponTextures.push_back(TextureManager::GetTexture(skinPrefix + "weaponR" + std::to_string(fileNumber1) + ".png"));
+    weaponTextures.push_back(TextureManager::GetTexture(skinPrefix + "weaponR" + std::to_string(fileNumber2) + ".png"));
 }
 
 WeaponSkinPreview::~WeaponSkinPreview() {
@@ -47,9 +50,12 @@ void WeaponSkinPreview::SetSkin(int skinId) {
         // Fallback to default skin if invalid
         skinPrefix = "assets/WeaponSkins/Default/";
     }
-    weaponTextures.push_back(TextureManager::GetTexture(skinPrefix + "weaponR1.png"));
-    weaponTextures.push_back(TextureManager::GetTexture(skinPrefix + "weaponR2.png"));
-    weaponTextures.push_back(TextureManager::GetTexture(skinPrefix + "weaponR3.png"));
+    int fileNumber0 = (skinId == 0) ? GetWeaponRenderFileNumber(0) : 0 + 1;
+    int fileNumber1 = (skinId == 0) ? GetWeaponRenderFileNumber(1) : 1 + 1;
+    int fileNumber2 = (skinId == 0) ? GetWeaponRenderFileNumber(2) : 2 + 1;
+    weaponTextures.push_back(TextureManager::GetTexture(skinPrefix + "weaponR" + std::to_string(fileNumber0) + ".png"));
+    weaponTextures.push_back(TextureManager::GetTexture(skinPrefix + "weaponR" + std::to_string(fileNumber1) + ".png"));
+    weaponTextures.push_back(TextureManager::GetTexture(skinPrefix + "weaponR" + std::to_string(fileNumber2) + ".png"));
 }
 
 void WeaponSkinPreview::Update(float deltaTime) {
@@ -97,7 +103,8 @@ void WeaponSkinPreview::DrawPreview(Rectangle area, int skinId, Font font) {
     if (selectedWeaponSlot >= 0 && selectedWeaponSlot < 3) {
         int activeSkin = selectedSkins[selectedWeaponSlot];
         std::string skinPrefix = GetWeaponSlotSkinPath(selectedWeaponSlot, activeSkin);
-        std::string texturePath = skinPrefix + "weaponR" + std::to_string(selectedWeaponSlot + 1) + ".png";
+        int fileNumber = (activeSkin == 0) ? GetWeaponRenderFileNumber(selectedWeaponSlot) : selectedWeaponSlot + 1;
+        std::string texturePath = skinPrefix + "weaponR" + std::to_string(fileNumber) + ".png";
         Texture2D tex = TextureManager::GetTexture(texturePath);
         if (tex.id != 0) {
             float weaponScale = 0.26f; // Nice large centered weapon scale (doesn't cut off)
@@ -227,7 +234,8 @@ int WeaponSkinPreview::DrawSelector(Rectangle area, Font font, int& selectedSkin
         if (!locked) {
             // Draw active weapon icon in the card with wide crop and padding
             std::string skinPrefix = GetWeaponSlotSkinPath(selectedWeaponSlot, i);
-            std::string texturePath = skinPrefix + "weaponR" + std::to_string(selectedWeaponSlot + 1) + ".png";
+            int fileNumber = (i == 0) ? GetWeaponRenderFileNumber(selectedWeaponSlot) : selectedWeaponSlot + 1;
+            std::string texturePath = skinPrefix + "weaponR" + std::to_string(fileNumber) + ".png";
             Texture2D tex = TextureManager::GetTexture(texturePath);
             if (tex.id != 0) {
                 const float cropX = 350.0f;

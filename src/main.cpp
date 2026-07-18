@@ -27,7 +27,20 @@ static GameplayScreen* s_activeGameplay = nullptr;
 int main() {
     SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_VSYNC_HINT);
     SetTraceLogLevel(LOG_WARNING); // Suppress INFO logs (texture loading spam = slow startup)
-    InitWindow(VIRTUAL_WIDTH, VIRTUAL_HEIGHT, "Soooon");
+    InitWindow(VIRTUAL_WIDTH, VIRTUAL_HEIGHT, "VANTA");
+
+    // Set the app/window icon (shown in title bar, taskbar, and alt-tab switcher).
+    // Must be called after InitWindow() since it needs an active window/GL context.
+    Image iconImage = LoadImage("assets/icon.png");
+    if (iconImage.data != nullptr) {
+        // Windows requires uncompressed 32-bit RGBA for window icons
+        ImageFormat(&iconImage, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8);
+        SetWindowIcon(iconImage);
+        UnloadImage(iconImage); // SetWindowIcon copies the data internally, safe to unload
+    } else {
+        TraceLog(LOG_WARNING, "Failed to load window icon: assets/icon.png");
+    }
+
     InitAudioDevice(); // Initialize audio device
     SetTargetFPS(60);
 

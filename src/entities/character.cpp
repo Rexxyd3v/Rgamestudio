@@ -99,7 +99,8 @@ Character::Character(Vector2 startPosition, const std::string& assetPath, float 
 
     auto loadSlot = [&](int slot, int skinId) -> Texture2D {
         std::string slotPath = GetWeaponSlotSkinPath(slot, skinId);
-        std::string png = "weaponR" + std::to_string(slot + 1) + ".png";
+        int fileNumber = (skinId == 0) ? GetWeaponRenderFileNumber(slot) : slot + 1;
+        std::string png = "weaponR" + std::to_string(fileNumber) + ".png";
         return TextureManager::GetTexture(slotPath + png);
     };
 
@@ -163,7 +164,8 @@ void Character::SetWeaponSkin(int weaponSkin) {
     auto loadSlot = [&](int slot, int skinId) -> Texture2D {
         // Slot path selection uses per-slot folders (SMG/Shotgun/Pistol)
         std::string slotPath = GetWeaponSlotSkinPath(slot, skinId);
-        std::string png = "weaponR" + std::to_string(slot + 1) + ".png";
+        int fileNumber = (skinId == 0) ? GetWeaponRenderFileNumber(slot) : slot + 1;
+        std::string png = "weaponR" + std::to_string(fileNumber) + ".png";
         return TextureManager::GetTexture(slotPath + png);
     };
 
@@ -316,7 +318,7 @@ void Character::Draw() {
             std::string defShotgun = GetWeaponSlotSkinPath(1, 0);
             std::string defPistol = GetWeaponSlotSkinPath(2, 0);
             std::string defPrefix = (currentWeaponIndex == 0) ? defSMG : (currentWeaponIndex == 1 ? defShotgun : defPistol);
-            currentTex = TextureManager::GetTexture(defPrefix + "weaponR" + std::to_string(currentWeaponIndex + 1) + ".png");
+            currentTex = TextureManager::GetTexture(defPrefix + "weaponR" + std::to_string(GetWeaponRenderFileNumber(currentWeaponIndex)) + ".png");
             haveGun = (currentTex.id != 0);
         }
 

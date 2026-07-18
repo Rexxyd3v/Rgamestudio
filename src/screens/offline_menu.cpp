@@ -213,7 +213,7 @@ bool OfflineMenuScreen::Update(float deltaTime) {
             NetworkManager::GetInstance().localWeaponSkin = skinId;
 
             startGame = true;
-            return true; // Remain on this screen; main.cpp will detect startGame and transition
+            return false; // Return false to trigger main.cpp's screen-transition check, where ShouldStartGame() determines whether to go to GameplayScreen or back to MainMenuScreen
         }
     }
 
