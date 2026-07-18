@@ -82,6 +82,8 @@ Character::Character(Vector2 startPosition, const std::string& assetPath, float 
     LoadAnimations(assetPath);
 
     currentWeaponIndex = 0;
+    weaponSkinId = weaponSkin;
+    currentWeaponSkin = weaponSkin;
     std::string skinPrefix = WeaponSkinPath(static_cast<WeaponSkinId>(weaponSkin));
     if (skinPrefix.empty()) {
         // Fallback to default skin if invalid
@@ -134,6 +136,8 @@ void Character::SetWeaponSkin(int weaponSkin) {
 
     // Load new weapon textures based on the weapon skin
     std::string weaponPath = "assets/Free 2D Animated Vector Game Character Sprites/Free 2D Animated Vector Game Character Sprites/Weapons/";
+    weaponSkinId = weaponSkin;
+    currentWeaponSkin = weaponSkin;
     std::string skinPrefix = WeaponSkinPath(static_cast<WeaponSkinId>(weaponSkin));
     if (skinPrefix.empty()) {
         // Fallback to default skin if invalid
@@ -281,7 +285,7 @@ void Character::Draw() {
                               (float)currentTex.width  * weaponScale,
                               (float)currentTex.height * weaponScale };
         Vector2 origin = { pivotX, pivotY };
-        DrawTexturePro(currentTex, srcRec, dstRec, origin, rotation, WHITE);
+        DrawTexturePro(currentTex, srcRec, dstRec, origin, rotation, GetWeaponSkinTint(weaponSkinId));
 
         // Draw muzzle flash if recently fired
         if (muzzleFlashTimer > 0.0f) {

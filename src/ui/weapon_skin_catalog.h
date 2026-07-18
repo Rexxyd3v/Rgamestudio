@@ -19,6 +19,10 @@ enum class WeaponSkinId {
 // Returns empty string for locked skins.
 const char* WeaponSkinPath(WeaponSkinId id);
 
+// Returns a tint color for the weapon-specific skin selection so the player can
+// see distinct visual variants even when only the shared default texture set exists.
+Color GetWeaponSkinTint(int skinId);
+
 // Returns a vector of GalleryItem for the select gallery.
 std::vector<Ui::GalleryItem> GetWeaponSkinGalleryItems();
 

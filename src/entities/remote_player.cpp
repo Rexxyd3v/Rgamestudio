@@ -1,11 +1,13 @@
 #include "remote_player.h"
 
-static const float REMOTE_CHAR_SCALE = 0.08f;
+static const float CHAR_SCALE = 0.08f;
+
 
 static const std::string CHAR_PATH = "assets/Free 2D Animated Vector Game Character Sprites/Free 2D Animated Vector Game Character Sprites/Full body animated characters/";
 
 RemotePlayer::RemotePlayer(Vector2 startPos, const std::string& assetPath, int weaponSkin)
-    : Character(startPos, assetPath, 0.08f, weaponSkin), peerID(0), username("Player"), kills(0), deaths(0), lastAimDir({0.0f, 0.0f}) {
+    : Character(startPos, assetPath, CHAR_SCALE, weaponSkin), peerID(0), username("Player"), lastAimDir({0.0f, 0.0f}) {
+
     // Keep the inherited Character::name in sync so the head-label draw code
     // (which reads Character::name) works for online players too.
     Character::SetName(username);
@@ -14,7 +16,7 @@ RemotePlayer::RemotePlayer(Vector2 startPos, const std::string& assetPath, int w
 RemotePlayer::~RemotePlayer() {
 }
 
-void RemotePlayer::ApplyNetworkUpdate(Vector2 pos, int state, int weaponIndex, int faceDir, float hp, float jumpH, float jumpV) {
+void RemotePlayer::ApplyNetworkUpdate(Vector2 pos, int state, int weaponIndex, int faceDir, float hp, float jumpH, float jumpV, int weaponSkin) {
     // TEST: Direct assignment to position
     position.x = pos.x;
     position.y = pos.y;
@@ -24,6 +26,9 @@ void RemotePlayer::ApplyNetworkUpdate(Vector2 pos, int state, int weaponIndex, i
     if (newState != currentState) {
         SetState(newState);
     }
+
+    // Keep the remote player's weapon skin in sync with the networked selection.
+    SetRemoteWeaponSkin(weaponSkin);
 
     // Set weapon
     if (weaponIndex >= 0 && weaponIndex < (int)weaponTextures.size()) {

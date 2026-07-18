@@ -2,11 +2,16 @@
 #include <raylib.h>
 
 const char* WeaponSkinPath(WeaponSkinId id) {
-    switch (id) {
-        case WeaponSkinId::Default: return "assets/Free 2D Animated Vector Game Character Sprites/Free 2D Animated Vector Game Character Sprites/Weapons/";
-        case WeaponSkinId::Locked1: return ""; // locked
-        case WeaponSkinId::Locked2: return ""; // locked
-        default: return "";
+    (void)id;
+    return "assets/Free 2D Animated Vector Game Character Sprites/Free 2D Animated Vector Game Character Sprites/Weapons/";
+}
+
+Color GetWeaponSkinTint(int skinId) {
+    switch (skinId) {
+        case 1: return { 110, 220, 255, 255 }; // Neon Camo
+        case 2: return { 255, 120, 70, 255 };  // Magma / Flaming
+        case 3: return { 200, 200, 200, 255 }; // Carbon Fiber
+        default: return WHITE;
     }
 }
 

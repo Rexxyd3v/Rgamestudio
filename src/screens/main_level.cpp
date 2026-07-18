@@ -804,20 +804,19 @@ void GameplayScreen::Draw(RenderTexture2D target) {
                     } else {
                         contentSrc[fi] = { 0, 0, (float)img.width, (float)img.height };
                     }
-                    // Replace the cached GPU texture with the cropped one so further draws use tight bounds
-                    UnloadTexture(tex);
-                    Image crop = ImageFromImage(img, (Rectangle){
-                        contentSrc[fi].x, contentSrc[fi].y,
-                        contentSrc[fi].width, contentSrc[fi].height
-                    });
+                    // Keep the original GPU texture handle; just cache the source rect for DrawTexturePro.
+                    // This avoids runtime artifacts caused by UnloadTexture/LoadTexture during gameplay.
                     UnloadImage(img);
-                    tex = LoadTextureFromImage(crop);
-                    UnloadImage(crop);
                     contentSrcReady[fi] = true;
                 }
             }
-            // Use the (possibly-cropped) texture's full size
-            Rectangle src = { 0.0f, 0.0f, (float)tex.width, (float)tex.height };
+            // Use the cached source rect (cropped bounds)
+            Rectangle src = {
+                contentSrc[fi].x,
+                contentSrc[fi].y,
+                contentSrc[fi].width,
+                contentSrc[fi].height
+            };
             Rectangle dst = { (float)startX, (float)startY, (float)barWidth, (float)barHeight };
             DrawTexturePro(tex, src, dst, {0.0f, 0.0f}, 0.0f, WHITE);
         }
@@ -889,15 +888,9 @@ void GameplayScreen::Draw(RenderTexture2D target) {
                     } else {
                         dashContentSrc[fi] = { 0, 0, (float)img.width, (float)img.height };
                     }
-                    // Replace the cached GPU texture with the cropped one so further draws use tight bounds
-                    UnloadTexture(dtex);
-                    Image crop = ImageFromImage(img, (Rectangle){
-                        dashContentSrc[fi].x, dashContentSrc[fi].y,
-                        dashContentSrc[fi].width, dashContentSrc[fi].height
-                    });
+                    // Keep the original GPU texture handle; just cache the source rect for DrawTexturePro.
+                    // This avoids runtime artifacts caused by UnloadTexture/LoadTexture during gameplay.
                     UnloadImage(img);
-                    dtex = LoadTextureFromImage(crop);
-                    UnloadImage(crop);
                     dashContentSrcReady[fi] = true;
                 }
             }
@@ -906,7 +899,13 @@ void GameplayScreen::Draw(RenderTexture2D target) {
             int dashStartY = 63 + 5; // 5px gap below the health bar
             const int dashBarWidth  = 320;
             const int dashBarHeight = 10;  // slimmer than the health bar so it reads as a secondary indicator
-            Rectangle dSrc = { 0.0f, 0.0f, (float)dtex.width, (float)dtex.height };
+            // Use cached cropped bounds
+            Rectangle dSrc = {
+                dashContentSrc[fi].x,
+                dashContentSrc[fi].y,
+                dashContentSrc[fi].width,
+                dashContentSrc[fi].height
+            };
             Rectangle dDst = { (float)dashStartX, (float)dashStartY,
                                (float)dashBarWidth, (float)dashBarHeight };
             DrawTexturePro(dtex, dSrc, dDst, {0.0f, 0.0f}, 0.0f, WHITE);
@@ -934,7 +933,7 @@ void GameplayScreen::Draw(RenderTexture2D target) {
                 true, false
             });
             for (auto rp : remotePlayers) {
-                board.push_back({ rp->username.empty() ? "Player" : rp->username, rp->kills, rp->deaths, false, false });
+                board.push_back({ rp->username.empty() ? "Player" : rp->username, rp->GetKills(), rp->GetDeaths(), false, false });
             }
         } else {
             board.push_back({ player->GetName().empty() ? "You" : player->GetName(), player->GetKills(), player->GetDeaths(), true, false });
@@ -1121,15 +1120,17 @@ void GameplayScreen::PollNetworkEvents(float deltaTime) {
         PacketHeader header;
         std::memcpy(&header, ev.data.data(), sizeof(PacketHeader));
 
-        // Don't process our own packets sent back from the server.
-        // While we are waiting for an ID assignment (client side) we must
-        // accept packets from the host (playerID == 0) because our own ID
-        // is not yet known.
+        // Don't process self state updates sent back by the server.
+        // Gameplay events (kills/damage) must always be processed.
         if (!NetworkManager::GetInstance().IsWaitingForAssignment() &&
             !NetworkManager::GetInstance().IsHost() &&
-            header.playerID == myPlayerID) {
+            header.playerID == myPlayerID &&
+            (header.type == PacketType::PLAYER_UPDATE ||
+             header.type == PacketType::PLAYER_SHOOT)) {
             continue;
         }
+
+
 
         if (header.type == PacketType::PLAYER_UPDATE && ev.data.size() >= sizeof(PacketPlayerUpdate)) {
             PacketPlayerUpdate pkt;
@@ -1139,7 +1140,14 @@ void GameplayScreen::PollNetworkEvents(float deltaTime) {
             rp->username = std::string(pkt.username);
             // Keep the inherited Character::name in sync so the head-label draw code uses the latest username.
             rp->SetName(rp->username);
-            rp->ApplyNetworkUpdate(pkt.position, pkt.state, pkt.currentWeaponIndex, pkt.faceDirection, pkt.health, pkt.jumpHeight, pkt.jumpVelocity);
+            // Clamp to valid weapon indices [0..2].
+            // When multiple players join, stale/uninitialized values can cause remote
+            // weapons to render with the wrong texture/hand pivot.
+            int clampedWeaponIndex = pkt.currentWeaponIndex;
+            if (clampedWeaponIndex < 0) clampedWeaponIndex = 0;
+            if (clampedWeaponIndex > 2) clampedWeaponIndex = 2;
+
+            rp->ApplyNetworkUpdate(pkt.position, pkt.state, clampedWeaponIndex, pkt.faceDirection, pkt.health, pkt.jumpHeight, pkt.jumpVelocity, pkt.weaponSkin);
 
         } else if (header.type == PacketType::PLAYER_SHOOT && ev.data.size() >= sizeof(PacketPlayerShoot)) {
             PacketPlayerShoot pkt;
@@ -1171,15 +1179,20 @@ void GameplayScreen::PollNetworkEvents(float deltaTime) {
         } else if (header.type == PacketType::PLAYER_KILLED && ev.data.size() >= sizeof(PacketPlayerKilled)) {
             PacketPlayerKilled pkt;
             std::memcpy(&pkt, ev.data.data(), sizeof(PacketPlayerKilled));
+
+            // Ensure kills/deaths objects exist consistently on every client.
             if (pkt.killerPlayerID == myPlayerID) {
                 NetworkManager::GetInstance().localKills++;
             } else {
-                RemotePlayer* rp = FindOrCreateRemotePlayer(pkt.killerPlayerID, DEFAULT_PLAYER_SKIN, 0);
-                rp->kills++;
+                RemotePlayer* killerRp = FindOrCreateRemotePlayer(pkt.killerPlayerID, DEFAULT_PLAYER_SKIN, 0);
+                killerRp->AddKill();
             }
-            if (pkt.victimPlayerID != myPlayerID) {
-                RemotePlayer* rp = FindOrCreateRemotePlayer(pkt.victimPlayerID, DEFAULT_PLAYER_SKIN, 0);
-                rp->deaths++;
+
+            if (pkt.victimPlayerID == myPlayerID) {
+                NetworkManager::GetInstance().localDeaths++;
+            } else {
+                RemotePlayer* victimRp = FindOrCreateRemotePlayer(pkt.victimPlayerID, DEFAULT_PLAYER_SKIN, 0);
+                victimRp->AddDeath();
             }
         } else if (header.type == PacketType::PLAYER_RESPAWN && ev.data.size() >= sizeof(PacketPlayerRespawn)) {
             PacketPlayerRespawn pkt;
@@ -1187,6 +1200,7 @@ void GameplayScreen::PollNetworkEvents(float deltaTime) {
             RemotePlayer* rp = FindOrCreateRemotePlayer(pkt.header.playerID, pkt.charSkin, pkt.weaponSkin);
             rp->ResetHealth(100.0f);
             rp->SetPosition(pkt.spawnPosition);
+            rp->SetRemoteWeaponSkin(pkt.weaponSkin);
         } else if (header.type == PacketType::PLAYER_DISCONNECT && ev.data.size() >= sizeof(PacketPlayerDisconnectHeader)) {
             PacketPlayerDisconnectHeader pkt;
             std::memcpy(&pkt, ev.data.data(), sizeof(PacketPlayerDisconnectHeader));

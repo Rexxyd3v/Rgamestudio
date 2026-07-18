@@ -104,7 +104,7 @@ void WeaponSkinPreview::DrawPreview(Rectangle area, int skinId, Font font) {
             dst.x += w / 2.0f;
             dst.y += h / 2.0f;
 
-            DrawTexturePro(tex, src, dst, origin, offset, WHITE);
+            DrawTexturePro(tex, src, dst, origin, offset, GetWeaponSkinTint(selectedSkins[selectedWeaponSlot]));
         }
     }
 
@@ -213,7 +213,7 @@ int WeaponSkinPreview::DrawSelector(Rectangle area, Font font, int& selectedSkin
 
                 Rectangle src = { cropX, cropY, cropW, cropH };
                 Rectangle dst = { x, y, w, h };
-                DrawTexturePro(tex, src, dst, { 0, 0 }, 0.0f, WHITE);
+                DrawTexturePro(tex, src, dst, { 0, 0 }, 0.0f, GetWeaponSkinTint(i));
             }
         } else {
             // Draw locked icon style

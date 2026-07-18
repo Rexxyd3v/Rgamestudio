@@ -171,6 +171,8 @@ protected:
     std::vector<std::shared_ptr<Projectile>> projectiles;
     std::vector<Texture2D>                   weaponTextures;
     int                                      currentWeaponIndex;
+    int                                      weaponSkinId;
+    int                                      currentWeaponSkin;
 
     static bool combatAudioEnabled;
 
