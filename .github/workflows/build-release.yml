@@ -8,6 +8,7 @@ on:
 jobs:
   build-windows:
     runs-on: windows-latest
+
     permissions:
       contents: write
 
@@ -15,7 +16,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # ─── Setup MSYS2 (same toolchain as dev machine) ───────────────────────
+      # Setup MSYS2
       - name: Setup MSYS2
         uses: msys2/setup-msys2@v2
         with:
@@ -23,46 +24,60 @@ jobs:
           update: true
           install: >-
             mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-pkgconf
             mingw-w64-ucrt-x86_64-raylib
             mingw-w64-ucrt-x86_64-enet
+            mingw-w64-ucrt-x86_64-opus
+            mingw-w64-ucrt-x86_64-opusfile
+            mingw-w64-ucrt-x86_64-libvorbis
+            mingw-w64-ucrt-x86_64-miniaudio
 
-      # ─── Build the game ─────────────────────────────────────────────────────
+      # Build
       - name: Build Rgamestudio
         shell: msys2 {0}
         run: |
           mkdir -p bin
-          g++ src/*.cpp src/screens/*.cpp src/utils/*.cpp src/entities/*.cpp src/network/*.cpp src/ui/*.cpp \
-            -o bin/Rgamestudio.exe \
-            -lraylib -lenet -lws2_32 -lopengl32 -lgdi32 -lwinmm \
-            -O2 -std=c++17
 
-      # ─── Collect required DLLs from MSYS2 automatically ────────────────────
+          g++ \
+            src/*.cpp \
+            src/screens/*.cpp \
+            src/utils/*.cpp \
+            src/entities/*.cpp \
+            src/network/*.cpp \
+            src/ui/*.cpp \
+            src/voice/*.cpp \
+            -o bin/Rgamestudio.exe \
+            -std=c++17 \
+            -O2 \
+            -lws2_32 \
+            $(pkg-config --cflags raylib opus libenet miniaudio) \
+            $(pkg-config --libs raylib opus libenet miniaudio)
+
+      # Package
       - name: Collect DLLs and Assets
         shell: msys2 {0}
         run: |
           mkdir -p release_package
 
-          # Copy the built exe
           cp bin/Rgamestudio.exe release_package/
-
-          # Copy assets folder
           cp -r assets release_package/
 
-          # Automatically find and copy all required DLLs (only from /ucrt64/bin)
           ldd bin/Rgamestudio.exe \
             | grep '/ucrt64/bin' \
             | awk '{print $3}' \
             | xargs -I{} cp {} release_package/
 
-      # ─── Create ZIP for release ─────────────────────────────────────────────
-      - name: Create release ZIP
+      # Zip
+      - name: Create Release ZIP
         shell: pwsh
         run: |
           $tag = "${{ github.ref_name }}"
-          Compress-Archive -Path release_package\* -DestinationPath "Rgamestudio-$tag-windows.zip"
+          Compress-Archive `
+            -Path release_package\* `
+            -DestinationPath "Rgamestudio-$tag-windows.zip"
 
-      # ─── Upload to GitHub Release ───────────────────────────────────────────
-      - name: Upload Release
+      # Release
+      - name: Upload GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           name: "Rgamestudio ${{ github.ref_name }}"
@@ -71,13 +86,17 @@ jobs:
 
             ### How to Play
             1. Download `Rgamestudio-${{ github.ref_name }}-windows.zip`
-            2. Extract the ZIP anywhere on your PC
-            3. Double-click `Rgamestudio.exe` — No installation needed!
+            2. Extract the ZIP.
+            3. Run `Rgamestudio.exe`.
 
             ### Requirements
-            - Windows 10 or later (64-bit)
-          files: "Rgamestudio-${{ github.ref_name }}-windows.zip"
+            - Windows 10/11 (64-bit)
+
+          files: |
+            Rgamestudio-${{ github.ref_name }}-windows.zip
+
           draft: false
           prerelease: false
+
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
