@@ -129,6 +129,9 @@ public:
     bool Update(float deltaTime) override;
     void Draw(RenderTexture2D target) override;
 
+    // Used by voice/proximity system in main.cpp
+    Character* GetLocalPlayer() const { return player; }
+
 private:
     // Entities
     GameMode currentMode;

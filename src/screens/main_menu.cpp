@@ -21,8 +21,11 @@ MainMenuScreen::MainMenuScreen() {
     if (skinIdx < 1 || skinIdx > 4) skinIdx = 1;
     background = new MenuBackground(skinIdx, MenuBackground::BackdropStyle::CINEMATIC_BEACH);
 
-    fadeInTimer = 0.0f;
-    blurStrength = 0.85f;
+    // Start fully black — background pre-warms invisibly for ~0.6s so bots are
+    // already mid-battle when the scene fades in. Prevents the jarring snap.
+    fadeInTimer = -0.6f;
+    blurStrength = 1.0f;   // start fully blurred, ease to target
+    uiRise = 0.0f;
 
     mainMenuMusic = LoadMusicStream("assets/sounds/MAINSOUNDTRACK.wav");
     SetMusicVolume(mainMenuMusic, 0.0f);
@@ -47,9 +50,13 @@ MainMenuScreen::~MainMenuScreen() {
 bool MainMenuScreen::Update(float deltaTime) {
     UpdateMusicStream(mainMenuMusic);
 
-    fadeInTimer += deltaTime / 1.35f;
+    // Advance timer (starts at -0.6, crosses 0, then climbs to 1.0)
+    fadeInTimer += deltaTime / 1.6f;
     if (fadeInTimer > 1.0f) fadeInTimer = 1.0f;
-    SetMusicVolume(mainMenuMusic, fadeInTimer);
+
+    // Music and visuals only start once we cross zero (pre-warm phase is silent)
+    float visibleAlpha = (fadeInTimer < 0.0f) ? 0.0f : fadeInTimer;
+    SetMusicVolume(mainMenuMusic, visibleAlpha);
 
     blurStrength = Ui::Approach(blurStrength, 0.42f, 0.35f, deltaTime);
     uiRise = Ui::Approach(uiRise, 1.0f, 2.2f, deltaTime);
@@ -81,8 +88,11 @@ bool MainMenuScreen::Update(float deltaTime) {
 }
 
 void MainMenuScreen::Draw(RenderTexture2D target) {
+    // Clamp to [0,1] for all visual operations
+    float visibleAlpha = (fadeInTimer < 0.0f) ? 0.0f : fadeInTimer;
+
     if (background) {
-        background->Draw(target, fadeInTimer, blurStrength);
+        background->Draw(target, visibleAlpha, blurStrength);
     } else {
         BeginTextureMode(target);
         ClearBackground(BLACK);
@@ -91,15 +101,14 @@ void MainMenuScreen::Draw(RenderTexture2D target) {
 
     BeginTextureMode(target);
 
-    if (fadeInTimer < 1.0f) {
-        DrawRectangle(0, 0, VIRTUAL_WIDTH, VIRTUAL_HEIGHT,
-                      Fade(BLACK, 1.0f - fadeInTimer));
-    }
+    // Full black overlay during pre-warm, then fades out as visibleAlpha climbs
+    DrawRectangle(0, 0, VIRTUAL_WIDTH, VIRTUAL_HEIGHT,
+                  Fade(BLACK, 1.0f - visibleAlpha));
 
     Ui::DrawVignette(0.7f);
 
-    float risePx = (1.0f - uiRise) * 24.0f;
-    float brandAlpha = fadeInTimer * uiRise;
+    float risePx    = (1.0f - uiRise) * 24.0f;
+    float brandAlpha = visibleAlpha * uiRise;
 
     // Left brand column
     DrawTextEx(menuFont, "SOOOON",

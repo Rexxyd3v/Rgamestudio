@@ -19,9 +19,15 @@ static const WeaponStats WEAPONS[] = {
     { 12, 1.2f, 0.4f,  750.0f,  900.0f, 20.0f }  // Pistol (Weapon 3)
 };
 
+// Static combat audio flag — disabled during menu background simulation
+bool Character::combatAudioEnabled = true;
+
 static void PlayWeaponSound(int index) {
     static Sound sounds[3] = { {0}, {0}, {0} };
     static bool loaded[3] = { false, false, false };
+
+    // Respect the global combat audio flag (muted during menu background)
+    if (!Character::IsCombatAudioEnabled()) return;
     
     std::string paths[3] = {
         "assets/sounds/weapon1.mp3", // Weapon 1 (SMG)
@@ -462,5 +468,3 @@ void Character::TriggerReload() {
         reloadTimer = WEAPONS[currentWeaponIndex].reloadTime;
     }
 }
-
-bool Character::combatAudioEnabled = true;

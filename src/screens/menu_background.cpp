@@ -3,6 +3,7 @@
 #include "../utils/texture_manager.h"
 #include "../network/network_manager.h"
 #include "../entities/projectile.h"
+#include "../entities/character.h"
 #include <algorithm>
 #include <cmath>
 #include <functional>
@@ -103,6 +104,7 @@ MenuBackground::MenuBackground(int localSkinIndex, BackdropStyle style) {
 
     // Enable professional demo-mode AI for all bots (menu-only, reverted in destructor)
     BotEnemy::SetDemoMode(true);
+    Character::SetCombatAudioEnabled(false); // Silence gun SFX on menu
 
     // Parallax option not present in this build; keep disabled.
     (void)style;
@@ -132,6 +134,7 @@ MenuBackground::MenuBackground(int localSkinIndex, BackdropStyle style) {
 MenuBackground::~MenuBackground() {
     // Restore normal gameplay AI before we go
     BotEnemy::SetDemoMode(false);
+    Character::SetCombatAudioEnabled(true); // Restore weapon SFX for gameplay
     for (auto b : bots) delete b;
     UnloadRenderTexture(sceneRT);
     UnloadRenderTexture(blurRT1);

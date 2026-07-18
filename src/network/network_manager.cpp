@@ -9,11 +9,12 @@
 #include <ctime>
 #include <algorithm>
 #include <cctype>
-#include "../voice/voice_chat.h"
+#include "../voice/proximity_voice_chat.h"
 
-// Extern declarations for voice chat
-extern VoiceChat voiceChat;
-extern bool voiceInitialized;
+
+// Voice chat integration is handled by the main loop.
+// NetworkManager must not depend on extern globals defined elsewhere.
+
 
 
 
@@ -509,6 +510,10 @@ void NetworkManager::Update() {
                             // because the host always sends the canonical entry.
                             UpsertPlayer(playerID, uname, skin, weaponSkin);
 
+                            // Initialize player position for proximity voice chat
+                            // Default position (0,0) - will be updated by first PLAYER_UPDATE
+                            playerPositions[playerID] = {0.0f, 0.0f};
+
                             if (isHost) {
                                 // Host: rebroadcast to all OTHER connected clients so they
                                 // also upsert this player. We rewrite the header to use the
@@ -568,6 +573,9 @@ void NetworkManager::Update() {
                             int charSkin = updatePacket->charSkin;
                             int weaponSkin = updatePacket->weaponSkin;
                             UpsertPlayer(playerID, username, charSkin, weaponSkin);
+
+                            // Update player position for proximity voice chat
+                            playerPositions[playerID] = updatePacket->position;
                         }
                         if (isHost) {
                             for (size_t i = 0; i < host->peerCount; ++i) {
@@ -628,6 +636,9 @@ void NetworkManager::Update() {
                                 const PlayerInfo* existing = FindPlayer(playerID);
                                 std::string username = existing ? existing->username : "";
                                 UpsertPlayer(playerID, username, charSkin, weaponSkin);
+
+                                // Update player position for proximity voice chat
+                                playerPositions[playerID] = respPacket->spawnPosition;
                             }
                             // Rebroadcast to other clients
                             for (size_t i = 0; i < host->peerCount; ++i) {
@@ -653,20 +664,78 @@ void NetworkManager::Update() {
                             }
                         }
                     } else if (packetType == PacketType::VOICE_DATA) {
-                        // Voice data packets are not added to incomingEvents for game logic
-                        // They are processed directly by the voice chat system
+                        // Voice data packets are processed directly by the voice chat system
                         if (netEvent.data.size() >= sizeof(PacketVoiceData)) {
-                            // Forward to voice chat system for processing
-                            // Access the global voice chat instance from main.cpp
-                            extern VoiceChat voiceChat;
-                            extern bool voiceInitialized;
-                            if (voiceInitialized) {
-                                // Extract the voice packet data
-                                const PacketVoiceData* voicePacket =
-                                    reinterpret_cast<const PacketVoiceData*>(netEvent.data.data());
-                                voiceChat.processVoicePacket(voicePacket, netEvent.senderID);
+                            // Extract the voice packet data
+                            const PacketVoiceData* voicePacket =
+                                reinterpret_cast<const PacketVoiceData*>(netEvent.data.data());
+
+                            uint32_t speakerID = voicePacket->header.playerID;
+
+                            // Echo prevention: don't play back our own voice reflected from host
+                            if (speakerID != localPlayerID) {
+                                // If host, rebroadcast this voice packet to all other connected clients
+                                if (isHost) {
+                                    for (size_t i = 0; i < host->peerCount; ++i) {
+                                        ENetPeer* peer = &host->peers[i];
+                                        if (peer == event.peer) continue;
+                                        if (peer->state != ENET_PEER_STATE_CONNECTED) continue;
+                                        ENetPacket* p = enet_packet_create(
+                                            netEvent.data.data(), netEvent.data.size(), 0);
+                                        enet_peer_send(peer, 0, p);
+                                    }
+                                }
+
+                                // Check proximity before processing voice locally
+                                bool shouldProcess = false;
+
+                                // Get speaker position from our tracking
+                                auto senderPosIt = playerPositions.find(speakerID);
+                                Vector2 senderPos = {0.0f, 0.0f};
+                                bool senderPosValid = false;
+                                if (senderPosIt != playerPositions.end()) {
+                                    senderPos = senderPosIt->second;
+                                    senderPosValid = true;
+                                }
+
+                                // Get local player position from gameplay screen
+                                Vector2 localPos = {0.0f, 0.0f};
+                                bool localPosValid = false;
+
+                                // Try to get local player position from gameplay screen
+                                extern bool (*getLocalPlayerPosCallback)(Vector2& outPos);
+                                if (getLocalPlayerPosCallback && getLocalPlayerPosCallback(localPos)) {
+                                    localPosValid = true;
+                                }
+
+                                // If we have both positions, check distance
+                                if (localPosValid && senderPosValid) {
+                                    float dx = senderPos.x - localPos.x;
+                                    float dy = senderPos.y - localPos.y;
+                                    float distanceSq = dx*dx + dy*dy;
+                                    float hearingDistanceSq = 800.0f * 800.0f; // 800 units hearing range
+
+                                    if (distanceSq <= hearingDistanceSq) {
+                                        shouldProcess = true;
+                                    }
+                                }
+                                // If we can't get positions for some reason, process the packet anyway
+                                else {
+                                    shouldProcess = true;
+                                }
+
+                                // Forward to proximity voice chat system for processing if within range
+                                if (shouldProcess) {
+                                    extern ProximityVoiceChat proximityVoiceChat;
+                                    extern bool proximityVoiceInitialized;
+                                    if (proximityVoiceInitialized) {
+                                        proximityVoiceChat.processVoicePacket(voicePacket, speakerID);
+                                    }
+                                }
                             }
                         }
+                        enet_packet_destroy(event.packet);
+                        break;
                     }
                 }
                 incomingEvents.push_back(netEvent);

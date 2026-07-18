@@ -7,8 +7,8 @@
 #include <math.h>
 #include <algorithm>
 #include <cstring>
-#include "../voice/voice_chat.h"
-extern VoiceChat voiceChat;
+#include "../voice/proximity_voice_chat.h"
+extern ProximityVoiceChat proximityVoiceChat;
 
 
 // Simple clamp helper (raylib Clamp may not be available without raymath)
@@ -756,11 +756,11 @@ void GameplayScreen::Draw(RenderTexture2D target) {
     };
 
     // Local player
-    drawSpeakDot(player->GetPosition(), player->GetJumpHeight() + 10.0f, voiceChat.isLocalSpeaking());
+    drawSpeakDot(player->GetPosition(), player->GetJumpHeight() + 10.0f, proximityVoiceChat.isLocalSpeaking());
 
     // Remote players
     for (auto* rp : remotePlayers) {
-        drawSpeakDot(rp->GetPosition(), rp->GetJumpHeight() + 10.0f, voiceChat.isUserSpeaking(rp->peerID));
+        drawSpeakDot(rp->GetPosition(), rp->GetJumpHeight() + 10.0f, proximityVoiceChat.isUserSpeaking(rp->peerID));
     }
 
     EndMode2D();

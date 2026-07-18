@@ -10,11 +10,18 @@
 #include "screens/lobby_screen.h"
 #include "network/network_manager.h"
 #include "utils/texture_manager.h"
-#include "voice/voice_chat.h"
+#include "voice/proximity_voice_chat.h"
 
-// Global voice chat instance
-VoiceChat voiceChat;
-bool voiceInitialized = false;
+// Global voice chat instance (external linkage so network_manager.cpp can extern-link them)
+ProximityVoiceChat proximityVoiceChat;
+bool proximityVoiceInitialized = false;
+
+// Callback used by network_manager.cpp to get the local player world position for proximity checks.
+// Set to a valid function pointer while GameplayScreen is active, nullptr otherwise.
+bool (*getLocalPlayerPosCallback)(Vector2& outPos) = nullptr;
+
+// Pointer to active GameplayScreen used by getLocalPlayerPosCallback
+static GameplayScreen* s_activeGameplay = nullptr;
 
 int main() {
     SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_VSYNC_HINT);
@@ -24,8 +31,8 @@ int main() {
     SetTargetFPS(60);
 
     // Initialize voice chat system
-    voiceInitialized = voiceChat.initialize();
-    if (!voiceInitialized) {
+    proximityVoiceInitialized = proximityVoiceChat.initialize();
+    if (!proximityVoiceInitialized) {
         TraceLog(LOG_WARNING, "Failed to initialize voice chat system");
     }
 
@@ -47,17 +54,13 @@ int main() {
 
         // Handle push-to-talk with C key
         if (IsKeyDown(KEY_C)) {
-            voiceChat.setTransmitEnabled(true);
+            proximityVoiceChat.setTransmitEnabled(true);
         } else {
-            voiceChat.setTransmitEnabled(false);
+            proximityVoiceChat.setTransmitEnabled(false);
         }
 
-        // Update voice chat system
-        voiceChat.captureAudio();
-        voiceChat.updatePlayback(GetFrameTime());
-
         float deltaTime = GetFrameTime();
-        
+
         // Update logic
         if (currentScreen) {
             if (!currentScreen->Update(deltaTime)) {
@@ -115,12 +118,34 @@ int main() {
                 }
             }
         }
-        
+
+        // Update voice chat system
+        if (proximityVoiceInitialized && currentScreen) {
+            // Try to get local player from current screen if it's a gameplay screen
+            GameplayScreen* gameplayScreen = dynamic_cast<GameplayScreen*>(currentScreen);
+            if (gameplayScreen) {
+                // Track active gameplay screen so the callback can query it
+                s_activeGameplay = gameplayScreen;
+                getLocalPlayerPosCallback = [](Vector2& outPos) -> bool {
+                    if (s_activeGameplay && s_activeGameplay->GetLocalPlayer()) {
+                        outPos = s_activeGameplay->GetLocalPlayer()->GetPosition();
+                        return true;
+                    }
+                    return false;
+                };
+                proximityVoiceChat.update(deltaTime, gameplayScreen->GetLocalPlayer());
+            } else {
+                s_activeGameplay = nullptr;
+                getLocalPlayerPosCallback = nullptr; // Not in gameplay — disable proximity
+                proximityVoiceChat.update(deltaTime, nullptr); // Update without proximity check
+            }
+        }
+
         // Draw logic
         if (currentScreen) {
             currentScreen->Draw(target);
         }
-        
+
         BeginDrawing();
         ClearBackground(BLACK);
         DrawScaledToScreen(target);
@@ -135,7 +160,7 @@ int main() {
     // TextureManager cleanup
     TextureManager::UnloadAll();
     NetworkManager::GetInstance().Shutdown();
-    
+
     CloseAudioDevice(); // Close audio device
     CloseWindow();
     return 0;

@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 #include <ws2tcpip.h>
+#include <map>
 #include "../constants.h"
 #include "packets.h"
 
@@ -119,6 +120,9 @@ private:
     // player. Game code must always work with the playerID.
     // Keyed by (uint16_t)incomingPeerID; values are 0 if the slot is unused.
     std::vector<uint16_t> incomingPeerIDToPlayerID;
+
+    // Player positions for proximity voice chat (world coordinates)
+    std::map<uint32_t, Vector2> playerPositions;
 
     std::vector<NetworkEvent> incomingEvents;
 
