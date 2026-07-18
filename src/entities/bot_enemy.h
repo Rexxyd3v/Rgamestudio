@@ -17,11 +17,20 @@ public:
     bool ShouldRespawn() const;
     void ResetDeathTimer();
 
+    // Demo/spectator mode: when true, the bot uses more aggressive AI constants
+    // (higher speed, faster shooting, more dashes/jumps) for the main menu
+    // live-gameplay background. Does NOT affect actual gameplay bots.
+    static void SetDemoMode(bool enabled);
+    static bool demoMode;
+
 private:
     float stateTimer;
     Vector2 targetPosition; // Where to move
     bool isMoving;
     float deathTimer;
+    // Strafe state for demo mode
+    float strafeDir;   // -1 or 1, randomized after each shot
+    float strafeTimer; // how long to strafe in current direction
 };
 
 #endif // BOT_ENEMY_H

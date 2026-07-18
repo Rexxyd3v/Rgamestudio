@@ -66,7 +66,7 @@ Character::Character(Vector2 startPosition, const std::string& assetPath, float 
       jumpHeight(0.0f), jumpVelocity(0.0f), baseHeight(0.0f), floorHeight(0.0f), feetOffset(10.0f), weaponRotation(0.0f),
       justShot(false), isMonster(false), kills(0), deaths(0), muzzleFlashTimer(0.0f),
       dashTimer(0.0f), dashCooldown(0.0f), dashDirection{0.0f, 0.0f}, shieldTimer(0.0f), shieldCooldown(0.0f),
-      reloadTimer(0.0f), lastHitTimer(0.0f), healthDisplay(100.0f) {
+      reloadTimer(0.0f), lastHitTimer(0.0f), healthDisplay(100.0f), godMode(false) {
 
     for (int i = 0; i < 3; ++i) {
         ammo[i] = WEAPONS[i].maxAmmo;
@@ -123,8 +123,15 @@ void Character::TakeDamage(float amount) {
     health -= amount;
     lastHitTimer = 3.0f; // show health bar for 3 seconds when hit
     if (health <= 0) {
-        health = 0;
-        SetState(CharState::DEATH);
+        // God mode (used by the main-menu background): clamp to 1 HP instead of
+        // dying so the simulated battle can run forever. The hit feedback above
+        // still triggers so the player visually flinches and the HP bar drops.
+        if (godMode) {
+            health = 1.0f;
+        } else {
+            health = 0;
+            SetState(CharState::DEATH);
+        }
     }
 }
 
@@ -207,61 +214,11 @@ void Character::ShootInDirection(Vector2 dir) {
 void Character::Draw() {
     float draw_y = position.y - jumpHeight;
     animations[currentState]->Draw({ position.x, draw_y }, faceDirection, scale);
-
-    // Overhead hit indicator health bar (with container border)
-    {
-        const float barWidth = 60.0f;
-        const float barHeight = 6.0f;
-        // Positioning: IGN is drawn later at nameY = draw_y - nameYOffset.
-        // Keep health bar just BELOW the IGN pill (not too high so it won't cover the head).
-        float nameYOffset = 800.0f * scale;
-        const int nameFontSize = 16;
-        const int namePadding  = 4;
-        const float pillHeight = (float)nameFontSize + (float)(2 * namePadding);
-
-        // Start the bar right after the pill bottom, with a smaller gap so it doesn't go up into the head.
-        // Add a scale-aware extra offset so it stays under the head and doesn't overlap with the character sprite.
-        float barY = (draw_y - nameYOffset) + pillHeight + (30.0f * scale);
-        Vector2 barPos = { position.x - barWidth / 2.0f, barY };
-        // Background
-        DrawRectangle((int)barPos.x, (int)barPos.y, (int)barWidth, (int)barHeight, {60, 60, 60, 200});
-        // Health fill (smoothed)
-        float healthFill = barWidth * (healthDisplay / 100.0f);
-        if (healthFill > 0.0f) {
-            Color healthColor = isMonster ? RED : GREEN;
-            DrawRectangle((int)barPos.x, (int)barPos.y, (int)healthFill, (int)barHeight, healthColor);
-        }
-        // Outline
-        DrawRectangleLines((int)barPos.x, (int)barPos.y, (int)barWidth, (int)barHeight, {200, 200, 200, 230});
-    }
-
     if (shieldTimer > 0.0f) {
         // Draw a glowing shield bubble centered on the character
         DrawCircleLines((int)position.x, (int)draw_y + 30, 42.0f, SKYBLUE);
         DrawCircleLines((int)position.x, (int)draw_y + 30, 44.0f, BLUE);
     }
-
-    // ---- Player name (IGN) floating above the head ----
-    if (!name.empty()) {
-        const int nameFontSize = 16;
-        const int namePadding  = 4;
-        int textWidth  = MeasureText(name.c_str(), nameFontSize);
-        int textHeight = nameFontSize;
-        // Anchor: above the head sprite. draw_y is the visual center of the character.
-        // Animations are ~120-140px tall, so place the text well above.
-        // Move label closer to the character's head. Make it scale-aware so it stays aligned across character sizes.
-        float nameYOffset = 800.0f * scale;
-        float nameY = draw_y - nameYOffset;
-        float nameX = position.x - textWidth / 2.0f;
-        // Background pill for readability against any ground
-        DrawRectangle((int)nameX - namePadding, (int)nameY - namePadding,
-                      textWidth + namePadding * 2, textHeight + namePadding * 2,
-                      { 0, 0, 0, 160 });
-        // Name text color: monsters in red, regular characters in white
-        Color nameColor = isMonster ? Color{ 255, 100, 100, 255 } : RAYWHITE;
-        DrawText(name.c_str(), (int)nameX, (int)nameY, nameFontSize, nameColor);
-    }
-
     // Update muzzle flash timer
     // (we tick it here since Draw is called every frame and avoids adding an Update call to the base class)
     // Note: Not perfectly frame-rate independent but sufficient for a quick flash effect
@@ -321,6 +278,58 @@ void Character::Draw() {
     }
 
     for (auto& proj : projectiles) proj->Draw();
+}
+
+void Character::DrawUI() {
+    float draw_y = position.y - jumpHeight;
+    
+    // Overhead hit indicator health bar (with container border)
+    {
+        const float barWidth = 60.0f;
+        const float barHeight = 6.0f;
+        // Positioning: IGN is drawn later at nameY = draw_y - nameYOffset.
+        // Keep health bar just BELOW the IGN pill (not too high so it won't cover the head).
+        float nameYOffset = 800.0f * scale;
+        const int nameFontSize = 16;
+        const int namePadding  = 4;
+        const float pillHeight = (float)nameFontSize + (float)(2 * namePadding);
+
+        // Start the bar right after the pill bottom, with a smaller gap so it doesn't go up into the head.
+        // Add a scale-aware extra offset so it stays under the head and doesn't overlap with the character sprite.
+        float barY = (draw_y - nameYOffset) + pillHeight + (30.0f * scale);
+        Vector2 barPos = { position.x - barWidth / 2.0f, barY };
+        // Background
+        DrawRectangle((int)barPos.x, (int)barPos.y, (int)barWidth, (int)barHeight, {60, 60, 60, 200});
+        // Health fill (smoothed)
+        float healthFill = barWidth * (healthDisplay / 100.0f);
+        if (healthFill > 0.0f) {
+            Color healthColor = isMonster ? RED : GREEN;
+            DrawRectangle((int)barPos.x, (int)barPos.y, (int)healthFill, (int)barHeight, healthColor);
+        }
+        // Outline
+        DrawRectangleLines((int)barPos.x, (int)barPos.y, (int)barWidth, (int)barHeight, {200, 200, 200, 230});
+    }
+
+    // ---- Player name (IGN) floating above the head ----
+    if (!name.empty()) {
+        const int nameFontSize = 16;
+        const int namePadding  = 4;
+        int textWidth  = MeasureText(name.c_str(), nameFontSize);
+        int textHeight = nameFontSize;
+        // Anchor: above the head sprite. draw_y is the visual center of the character.
+        // Animations are ~120-140px tall, so place the text well above.
+        // Move label closer to the character's head. Make it scale-aware so it stays aligned across character sizes.
+        float nameYOffset = 800.0f * scale;
+        float nameY = draw_y - nameYOffset;
+        float nameX = position.x - textWidth / 2.0f;
+        // Background pill for readability against any ground
+        DrawRectangle((int)nameX - namePadding, (int)nameY - namePadding,
+                      textWidth + namePadding * 2, textHeight + namePadding * 2,
+                      { 0, 0, 0, 160 });
+        // Name text color: monsters in red, regular characters in white
+        Color nameColor = isMonster ? Color{ 255, 100, 100, 255 } : RAYWHITE;
+        DrawText(name.c_str(), (int)nameX, (int)nameY, nameFontSize, nameColor);
+    }
 }
 
 bool Character::IsAnimationFinished() const {
@@ -418,3 +427,5 @@ void Character::TriggerReload() {
         reloadTimer = WEAPONS[currentWeaponIndex].reloadTime;
     }
 }
+
+bool Character::combatAudioEnabled = true;

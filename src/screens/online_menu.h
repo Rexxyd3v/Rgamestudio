@@ -2,7 +2,10 @@
 #define ONLINE_MENU_H
 
 #include "iscreen.h"
+#include "menu_background.h"
+#include "../ui/character_preview.h"
 #include <string>
+#include <raylib.h>
 
 class OnlineMenuScreen : public IScreen {
 public:
@@ -22,7 +25,26 @@ private:
     std::string joinAddress;
     std::string username;
     int currentSkin;
-    bool isConnecting;         // True while async join is in progress
-    std::string connectError;  // Set when a join attempt fails
+    bool isConnecting;
+    std::string connectError;
+
+    Font menuFont;
+    MenuBackground* background;
+    CharacterPreview* preview;
+
+    float fadeIn;
+    float blurStrength;
+    float hoverHost;
+    float hoverJoin;
+    float hoverGlobalBack;
+    float caretBlink;
+
+    Rectangle nameField;
+    Rectangle hostBtn;
+    Rectangle joinBtn;
+    Rectangle shell;
+    Rectangle stageArea;
+    Rectangle selectorArea;
 };
+
 #endif // ONLINE_MENU_H

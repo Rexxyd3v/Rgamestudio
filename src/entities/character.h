@@ -26,6 +26,7 @@ public:
 
     virtual void Update(float deltaTime) = 0;
     virtual void Draw();
+    virtual void DrawUI(); // Renders overhead HUD elements (health bar, IGN) after world objects
 
     Vector2 GetPosition() const   { return position; }
     void    SetPosition(Vector2 pos) { position = pos; }
@@ -47,6 +48,17 @@ public:
     bool    IsAnimationFinished() const;
     void    TakeDamage(float amount);
     float   GetHealth() const;
+
+    // God mode: clamps health to a minimum of 1.0 so the character can never die.
+    // Used by the main menu's background simulation where the player is rendered
+    // in the middle of an active battle but must not actually die. Visual hit
+    // feedback (lastHitTimer, etc.) still triggers normally.
+    void    SetGodMode(bool enabled) { godMode = enabled; }
+    bool    IsGodMode() const { return godMode; }
+
+    // Mute weapon SFX (menu background combat should be silent).
+    static void SetCombatAudioEnabled(bool enabled) { combatAudioEnabled = enabled; }
+    static bool IsCombatAudioEnabled() { return combatAudioEnabled; }
 
     // Stats
     std::string GetName() const { return name; }
@@ -142,6 +154,7 @@ protected:
     float      scale;
     float      health;
     float      healthDisplay; // for smooth health bar
+    bool       godMode;       // when true, health cannot drop below 1.0 (no death)
     float      speed;
     float      shootCooldown;
     float      currentShootCooldown;
@@ -158,6 +171,8 @@ protected:
     std::vector<std::shared_ptr<Projectile>> projectiles;
     std::vector<Texture2D>                   weaponTextures;
     int                                      currentWeaponIndex;
+
+    static bool combatAudioEnabled;
 
     void    LoadAnimations(const std::string& baseDir);
     void    SetState(CharState newState);

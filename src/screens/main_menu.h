@@ -3,6 +3,7 @@
 
 #include <raylib.h>
 #include "iscreen.h"
+#include "menu_background.h"
 #include "../constants.h"
 
 class MainMenuScreen : public IScreen {
@@ -19,16 +20,20 @@ private:
     Font menuFont;
     GameMode selectedMode;
 
-    Rectangle btn1Player;
-    Rectangle btn2Player;
+    Rectangle cardOffline;
+    Rectangle cardOnline;
 
-    bool hover1P;
-    bool hover2P;
+    float hoverOffline;
+    float hoverOnline;
 
     Music mainMenuMusic;
     Sound choiceSound;
 
-    bool shouldTransition;
+    MenuBackground* background;
+
+    float fadeInTimer;
+    float blurStrength;
+    float uiRise;
 };
 
 #endif // MAIN_MENU_H

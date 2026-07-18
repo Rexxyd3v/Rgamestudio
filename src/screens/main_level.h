@@ -54,15 +54,16 @@ struct Rock {
     // Approximate AABB for movement collision. Slightly inside the
     // visible silhouette so the player can brush past a rock without
     // getting stuck on a single pixel of overlap.
+    // Tight AABB around the visual base of the rock.
+    // position is the sprite CENTER (DrawTexturePro uses centered origin).
+    // We cover the lower-center portion where the rock physically sits on ground.
     Rectangle CollisionBounds() const {
-        float w = texW * scale * 0.75f;
-        float h = texH * scale * 0.55f;
-        return {
-            position.x - w * 0.5f,
-            position.y - h * 0.6f,
-            w,
-            h
-        };
+        float w = texW * scale * 0.35f;  // narrower than full sprite (rocks taper)
+        float h = texH * scale * 0.10f;  // reduced height
+        // Center the box slightly below the sprite center so it sits on the rock base
+        float cx = position.x;
+        float cy = position.y + texH * scale * 0.06f;
+        return { cx - w * 0.5f, cy - h * 0.5f, w, h };
     }
 
     // Draw shadow + the tinted rock sprite. Lives here so the depth-sort
@@ -87,19 +88,33 @@ struct Tree {
 
     // Depth-sort key: the base of the trunk in world space. The spec asks
     // for trunkHeight, which from a top-left dst anchor is the dst y + height.
+    // Ground contact point = bottom of sprite (center + half sprite height).
+    // Characters with feet ABOVE this sort behind; feet BELOW sort in front.
+    // Depth-sort key: the base of the trunk in world space.
+    // We set this to where the actual wooden trunk meets the dirt mound,
+    // so characters standing on the dirt mound will sort in front of the tree.
     float GetDepthY() const {
-        return position.y + trunkHeight;
+        float halfSprH = texH * scale * 0.5f;
+        return position.y + halfSprH - (trunkHeightPx * scale * 0.85f);
     }
 
-    // Only the trunk collides — leaves are non-solid. The trunk is the
-    // bottom trunkHeightPx pixels of the texture, centered horizontally.
+    // Only the trunk collides — leaves are non-solid.
+    // position is the sprite CENTER (draw call uses centered origin).
+    // Trunk sits at the BOTTOM of the sprite.
     Rectangle TrunkBounds() const {
-        return {
-            position.x + trunkOffsetX,
-            position.y + trunkHeight - trunkHeightPx * scale,
-            trunkWidth,
-            trunkHeightPx * scale
-        };
+        // Shift the bottom of the collision box UP so it covers the thickest part
+        // of the trunk just above the dirt mound.
+        float trunkBot = GetDepthY(); // match collision bottom to depth pivot
+        
+        // Make the collision box extremely thin vertically (just a tiny sliver)
+        float colHeight = 20.0f * scale; 
+        float trunkTop = trunkBot - colHeight;
+        
+        // Also make it a bit narrower horizontally so you don't get stuck on the edges
+        float narrowWidth = trunkWidth * 0.45f;
+        float halfW       = narrowWidth * 0.5f;
+        
+        return { position.x - halfW, trunkTop, narrowWidth, colHeight };
     }
 
     // Draw the palm tree (no rotation, no tint).

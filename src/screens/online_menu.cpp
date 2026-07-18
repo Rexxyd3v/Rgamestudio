@@ -1,9 +1,10 @@
 #include "online_menu.h"
 #include "../network/network_manager.h"
 #include "../constants.h"
-#include <iostream>
+#include "../ui/ui_widgets.h"
+#include "../ui/ui_theme.h"
 #include <cmath>
-#include "raylib.h"
+#include <string>
 
 OnlineMenuScreen::OnlineMenuScreen() :
     startGame(false),
@@ -13,43 +14,99 @@ OnlineMenuScreen::OnlineMenuScreen() :
     username("Player"),
     currentSkin(1),
     isConnecting(false),
-    connectError("") {
+    connectError(""),
+    background(nullptr),
+    preview(nullptr),
+    fadeIn(0.0f),
+    blurStrength(0.75f),
+    hoverHost(0.0f),
+    hoverJoin(0.0f),
+    hoverGlobalBack(0.0f),
+    caretBlink(0.0f) {
+
+    menuFont = LoadFontEx("assets/fonts/BruceForeverRegular-X3jd2.ttf", 60, nullptr, 0);
+    if (menuFont.texture.id == 0) menuFont = GetFontDefault();
+
+    if (NetworkManager::GetInstance().localSkinIndex >= 1 &&
+        NetworkManager::GetInstance().localSkinIndex <= 4) {
+        currentSkin = NetworkManager::GetInstance().localSkinIndex;
+    }
+    if (!NetworkManager::GetInstance().localUsername.empty()) {
+        username = NetworkManager::GetInstance().localUsername;
+    }
+
+    background = new MenuBackground(currentSkin, MenuBackground::BackdropStyle::CINEMATIC_BEACH);
+    preview = new CharacterPreview();
+
+    shell = { 70.0f, 70.0f, 1160.0f, 540.0f };
+    stageArea = { 110.0f, 130.0f, 520.0f, 320.0f };
+    selectorArea = { 110.0f, 470.0f, 520.0f, 100.0f };
+    nameField = { 720.0f, 220.0f, 420.0f, 48.0f };
+    hostBtn = { 720.0f, 340.0f, 420.0f, 64.0f };
+    joinBtn = { 720.0f, 420.0f, 420.0f, 64.0f };
 }
 
 OnlineMenuScreen::~OnlineMenuScreen() {
+    delete preview;
+    delete background;
+    if (menuFont.texture.id != GetFontDefault().texture.id) {
+        UnloadFont(menuFont);
+    }
 }
 
 bool OnlineMenuScreen::Update(float deltaTime) {
-    // -----------------------------------------------------------------------
-    // Async connecting state: poll every frame
-    // -----------------------------------------------------------------------
+    fadeIn = Ui::Approach(fadeIn, 1.0f, 2.0f, deltaTime);
+    blurStrength = Ui::Approach(blurStrength, 0.45f, 0.4f, deltaTime);
+    caretBlink += deltaTime * 2.0f;
+    if (caretBlink > 1.0f) caretBlink -= 1.0f;
+
+    if (background) background->Update(deltaTime, fadeIn);
+    if (preview) preview->Update(deltaTime);
+
     if (isConnecting) {
         auto state = NetworkManager::GetInstance().PollJoinRoom();
         if (state == NetworkManager::JoinState::CONNECTED) {
             isConnecting = false;
             goToLobby = true;
-            return false; // Transition to lobby
+            return false;
         } else if (state == NetworkManager::JoinState::FAILED) {
             isConnecting = false;
             connectError = "Connection failed. Check the address and try again.";
         }
-        // Allow ESC to cancel
         if (IsKeyPressed(KEY_ESCAPE)) {
             NetworkManager::GetInstance().Disconnect();
             isConnecting = false;
             connectError = "Connection cancelled.";
         }
-        return true; // Keep updating while connecting
+        return true;
     }
 
-    // -----------------------------------------------------------------------
-    // Normal input handling
-    // -----------------------------------------------------------------------
     if (IsKeyPressed(KEY_ESCAPE)) {
         if (activeInput != 0) {
             activeInput = 0;
         } else {
-            return false; // Go back
+            return false;
+        }
+    }
+
+    Vector2 mouse = Ui::RemapMouseToVirtual();
+
+    // Character select always available (including during join address entry)
+    {
+        const float gap = 12.0f;
+        float cardW = (selectorArea.width - gap * 3) / 4.0f;
+        for (int i = 0; i < 4; ++i) {
+            Rectangle card = {
+                selectorArea.x + i * (cardW + gap),
+                selectorArea.y,
+                cardW,
+                selectorArea.height
+            };
+            if (CheckCollisionPointRec(mouse, card) && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+                currentSkin = i + 1;
+                NetworkManager::GetInstance().localSkinIndex = currentSkin;
+                connectError = "";
+            }
         }
     }
 
@@ -67,7 +124,7 @@ bool OnlineMenuScreen::Update(float deltaTime) {
                 key = GetCharPressed();
             }
 
-            if (IsKeyPressed(KEY_BACKSPACE) && activeStr->length() > 0) {
+            if (IsKeyPressed(KEY_BACKSPACE) && !activeStr->empty()) {
                 activeStr->pop_back();
             }
 
@@ -85,7 +142,6 @@ bool OnlineMenuScreen::Update(float deltaTime) {
 
             if (IsKeyPressed(KEY_ENTER)) {
                 if (activeInput == 2) {
-                    // Start async join
                     connectError = "";
                     NetworkManager::GetInstance().localUsername = username;
                     NetworkManager::GetInstance().localSkinIndex = currentSkin;
@@ -100,35 +156,42 @@ bool OnlineMenuScreen::Update(float deltaTime) {
                 }
             }
         }
-    } else {
-        Vector2 mousePoint = GetMousePosition();
-        float scaleX = (float)GetScreenWidth() / VIRTUAL_WIDTH;
-        float scaleY = (float)GetScreenHeight() / VIRTUAL_HEIGHT;
-        mousePoint.x /= scaleX;
-        mousePoint.y /= scaleY;
 
-        Rectangle nameBtn = { VIRTUAL_WIDTH / 2.0f - 100, VIRTUAL_HEIGHT / 2.0f - 200, 200, 40 };
-        Rectangle skinBtn = { VIRTUAL_WIDTH / 2.0f - 100, VIRTUAL_HEIGHT / 2.0f - 140, 200, 40 };
-        Rectangle hostBtn = { VIRTUAL_WIDTH / 2.0f - 100, VIRTUAL_HEIGHT / 2.0f - 60, 200, 50 };
-        Rectangle joinBtn = { VIRTUAL_WIDTH / 2.0f - 100, VIRTUAL_HEIGHT / 2.0f + 30, 200, 50 };
+        // Still allow BACK while editing
+        Rectangle globalBackBtn = { 28.0f, VIRTUAL_HEIGHT - 60.0f, 150.0f, 42.0f };
+        bool hBack = CheckCollisionPointRec(mouse, globalBackBtn);
+        hoverGlobalBack = Ui::Approach(hoverGlobalBack, hBack ? 1.0f : 0.0f, 8.0f, deltaTime);
+        if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && hBack) {
+            activeInput = 0;
+        }
+        return true;
+    }
 
-        if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
-            connectError = ""; // Clear old error on any click
-            if (CheckCollisionPointRec(mousePoint, nameBtn)) {
-                activeInput = 1;
-            } else if (CheckCollisionPointRec(mousePoint, skinBtn)) {
-                currentSkin++;
-                if (currentSkin > 4) currentSkin = 1;
-            } else if (CheckCollisionPointRec(mousePoint, hostBtn)) {
-                NetworkManager::GetInstance().localUsername = username;
-                NetworkManager::GetInstance().localSkinIndex = currentSkin;
-                if (NetworkManager::GetInstance().HostRoom(DEFAULT_GAME_PORT)) {
-                    goToLobby = true;
-                    return false;
-                }
-            } else if (CheckCollisionPointRec(mousePoint, joinBtn)) {
-                activeInput = 2;
+    bool hHost = CheckCollisionPointRec(mouse, hostBtn);
+    bool hJoin = CheckCollisionPointRec(mouse, joinBtn);
+    Rectangle globalBackBtn = { 28.0f, VIRTUAL_HEIGHT - 60.0f, 150.0f, 42.0f };
+    bool hBack = CheckCollisionPointRec(mouse, globalBackBtn);
+
+    hoverHost = Ui::Approach(hoverHost, hHost ? 1.0f : 0.0f, 8.0f, deltaTime);
+    hoverJoin = Ui::Approach(hoverJoin, hJoin ? 1.0f : 0.0f, 8.0f, deltaTime);
+    hoverGlobalBack = Ui::Approach(hoverGlobalBack, hBack ? 1.0f : 0.0f, 8.0f, deltaTime);
+
+    if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+        connectError = "";
+        if (hBack) {
+            return false;
+        } else if (CheckCollisionPointRec(mouse, nameField)) {
+            activeInput = 1;
+        } else if (hHost) {
+            NetworkManager::GetInstance().localUsername = username;
+            NetworkManager::GetInstance().localSkinIndex = currentSkin;
+            if (NetworkManager::GetInstance().HostRoom(DEFAULT_GAME_PORT)) {
+                goToLobby = true;
+                return false;
             }
+            connectError = "Failed to host room.";
+        } else if (hJoin) {
+            activeInput = 2;
         }
     }
 
@@ -136,76 +199,88 @@ bool OnlineMenuScreen::Update(float deltaTime) {
 }
 
 void OnlineMenuScreen::Draw(RenderTexture2D target) {
+    if (background) {
+        background->Draw(target, fadeIn, blurStrength);
+    } else {
+        BeginTextureMode(target);
+        ClearBackground(BLACK);
+        EndTextureMode();
+    }
+
     BeginTextureMode(target);
-    ClearBackground({20, 20, 40, 255});
+    Ui::DrawVignette(0.65f);
 
-    DrawText("ONLINE MODE", VIRTUAL_WIDTH / 2 - MeasureText("ONLINE MODE", 40) / 2, 80, 40, WHITE);
+    Ui::DrawGlassPanel(shell, 0.95f);
 
-    // -----------------------------------------------------------------------
+    Ui::DrawSectionLabel(menuFont, "ONLINE", { shell.x + 36, shell.y + 22 }, 28.0f);
+    DrawTextEx(menuFont, "Choose your fighter, then host or join",
+               { shell.x + 36, shell.y + 56 }, 14.0f, 1.0f, UiTheme::TextMuted());
+
     // Connecting overlay
-    // -----------------------------------------------------------------------
     if (isConnecting) {
-        // Animated dots
-        int dots = (int)(GetTime() * 2.0) % 4;
-        std::string dotsStr(dots, '.');
-        std::string msg = "Connecting" + dotsStr;
-        DrawText(msg.c_str(), VIRTUAL_WIDTH / 2 - MeasureText(msg.c_str(), 30) / 2,
-                 VIRTUAL_HEIGHT / 2 - 30, 30, YELLOW);
-        DrawText("Press ESC to cancel", VIRTUAL_WIDTH / 2 - MeasureText("Press ESC to cancel", 18) / 2,
-                 VIRTUAL_HEIGHT / 2 + 20, 18, GRAY);
+        DrawRectangleRec(shell, UiTheme::DimOverlay());
+        Ui::DrawCenteredText(menuFont, "CONNECTING", VIRTUAL_HEIGHT * 0.42f, 36.0f, UiTheme::AccentGold());
+        float spin = (float)GetTime() * 4.0f;
+        Vector2 c = { VIRTUAL_WIDTH * 0.5f, VIRTUAL_HEIGHT * 0.55f };
+        for (int i = 0; i < 8; ++i) {
+            float a = spin + i * (PI * 0.25f);
+            float r = 28.0f;
+            DrawCircle(
+                (int)(c.x + cosf(a) * r),
+                (int)(c.y + sinf(a) * r),
+                4.0f, Fade(UiTheme::AccentGold(), 0.3f + (i / 8.0f) * 0.7f));
+        }
+        Ui::DrawCenteredText(menuFont, "ESC to cancel", VIRTUAL_HEIGHT * 0.62f, 16.0f, UiTheme::TextMuted());
         EndTextureMode();
         return;
     }
 
-    // -----------------------------------------------------------------------
-    // Normal UI
-    // -----------------------------------------------------------------------
+    // Left: character stage + selector
+    Ui::DrawSectionLabel(menuFont, "CHOOSE CHARACTER", { stageArea.x, stageArea.y - 22 }, 14.0f);
+    if (preview) {
+        preview->DrawStage(stageArea, currentSkin);
+        Vector2 mouse = Ui::RemapMouseToVirtual();
+        preview->DrawSelector(selectorArea, menuFont, currentSkin, mouse);
+    }
+
+    std::string charLabel = "CHAR " + std::to_string(currentSkin);
+    Vector2 charTextSize = MeasureTextEx(menuFont, charLabel.c_str(), 14.0f, 1.0f);
+    DrawTextEx(menuFont, charLabel.c_str(),
+               { stageArea.x + stageArea.width - charTextSize.x, stageArea.y - 22 },
+               14.0f, 1.0f, UiTheme::AccentGold());
+
+    // Right panel content
     if (activeInput == 2) {
-        DrawText("Enter server address:", VIRTUAL_WIDTH / 2 - 150, VIRTUAL_HEIGHT / 2 - 60, 20, LIGHTGRAY);
-        DrawText("Examples: 192.168.1.5  or  abc.gl.at.ply.gg:54321", VIRTUAL_WIDTH / 2 - 250,
-                 VIRTUAL_HEIGHT / 2 - 35, 16, GRAY);
-        DrawRectangle(VIRTUAL_WIDTH / 2 - 150, VIRTUAL_HEIGHT / 2 - 10, 300, 40, RAYWHITE);
-        DrawText(joinAddress.c_str(), VIRTUAL_WIDTH / 2 - 140, VIRTUAL_HEIGHT / 2, 20, DARKGRAY);
-        DrawText("Press ENTER to connect, ESC to cancel.", VIRTUAL_WIDTH / 2 - 200, VIRTUAL_HEIGHT / 2 + 50, 20, GRAY);
+        Ui::DrawSectionLabel(menuFont, "JOIN ROOM", { 720, 160 }, 22.0f);
+        DrawTextEx(menuFont, "Server address (LAN or playit.gg)",
+                   { 720, 195 }, 14.0f, 1.0f, UiTheme::TextMuted());
+
+        Rectangle addrField = { 720, 230, 420, 48 };
+        Ui::DrawTextField(addrField, menuFont, joinAddress.c_str(), true, caretBlink);
+
+        DrawTextEx(menuFont, "Examples: 192.168.1.5   or   abc.gl.at.ply.gg:54321",
+                   { 720, 295 }, 12.0f, 1.0f, UiTheme::TextMuted());
+        DrawTextEx(menuFont, "ENTER connect   -   ESC cancel",
+                   { 720, 330 }, 14.0f, 1.0f, UiTheme::TextMuted());
     } else {
-        Vector2 mousePoint = GetMousePosition();
-        float scaleX = (float)GetScreenWidth() / VIRTUAL_WIDTH;
-        float scaleY = (float)GetScreenHeight() / VIRTUAL_HEIGHT;
-        mousePoint.x /= scaleX;
-        mousePoint.y /= scaleY;
+        Ui::DrawSectionLabel(menuFont, "YOUR SETUP", { 720, 160 }, 22.0f);
 
-        Rectangle nameBtn = { VIRTUAL_WIDTH / 2.0f - 100, VIRTUAL_HEIGHT / 2.0f - 200, 200, 40 };
-        DrawRectangleRec(nameBtn, (activeInput == 1) ? WHITE : (CheckCollisionPointRec(mousePoint, nameBtn) ? LIGHTGRAY : GRAY));
-        DrawText(username.c_str(), nameBtn.x + 10, nameBtn.y + 10, 20, BLACK);
-        DrawText("Name", nameBtn.x - 60, nameBtn.y + 10, 20, RAYWHITE);
+        DrawTextEx(menuFont, "NAME", { 720, 195 }, 12.0f, 1.0f, UiTheme::TextMuted());
+        Ui::DrawTextField(nameField, menuFont, username.c_str(), activeInput == 1, caretBlink);
 
-        Rectangle skinBtn = { VIRTUAL_WIDTH / 2.0f - 100, VIRTUAL_HEIGHT / 2.0f - 140, 200, 40 };
-        DrawRectangleRec(skinBtn, CheckCollisionPointRec(mousePoint, skinBtn) ? LIGHTGRAY : GRAY);
-        std::string skinText = "Char " + std::to_string(currentSkin);
-        DrawText(skinText.c_str(), skinBtn.x + 60, skinBtn.y + 10, 20, BLACK);
-        DrawText("Skin", skinBtn.x - 60, skinBtn.y + 10, 20, RAYWHITE);
+        Ui::DrawMenuButton(hostBtn, menuFont, "CREATE ROOM", hoverHost, true, true);
+        Ui::DrawMenuButton(joinBtn, menuFont, "JOIN ROOM", hoverJoin, false, true);
 
-        Rectangle hostBtn = { VIRTUAL_WIDTH / 2.0f - 100, VIRTUAL_HEIGHT / 2.0f - 60, 200, 50 };
-        DrawRectangleRec(hostBtn, CheckCollisionPointRec(mousePoint, hostBtn) ? LIGHTGRAY : GRAY);
-        DrawText("Create Room (Host)", hostBtn.x + 10, hostBtn.y + 15, 20, BLACK);
-
-        Rectangle joinBtn = { VIRTUAL_WIDTH / 2.0f - 100, VIRTUAL_HEIGHT / 2.0f + 30, 200, 50 };
-        DrawRectangleRec(joinBtn, CheckCollisionPointRec(mousePoint, joinBtn) ? LIGHTGRAY : GRAY);
-        DrawText("Join Room", joinBtn.x + 50, joinBtn.y + 15, 20, BLACK);
-
-        DrawText("Host: use playit.gg UDP tunnel -> port 7777", VIRTUAL_WIDTH / 2 - 180,
-                 VIRTUAL_HEIGHT / 2 + 100, 16, GRAY);
-        DrawText("Join: paste playit address (host:port) or LAN IP", VIRTUAL_WIDTH / 2 - 200,
-                 VIRTUAL_HEIGHT / 2 + 120, 16, GRAY);
+        DrawTextEx(menuFont, "Host: open UDP 7777 (playit.gg tunnel OK)",
+                   { 720, 505 }, 12.0f, 1.0f, UiTheme::TextMuted());
+        DrawTextEx(menuFont, "Join: paste host:port or LAN IP",
+                   { 720, 525 }, 12.0f, 1.0f, UiTheme::TextMuted());
     }
 
-    // Show connection error if any
-    if (!connectError.empty()) {
-        DrawRectangle(0, VIRTUAL_HEIGHT - 60, VIRTUAL_WIDTH, 50, Fade(RED, 0.8f));
-        DrawText(connectError.c_str(),
-                 VIRTUAL_WIDTH / 2 - MeasureText(connectError.c_str(), 20) / 2,
-                 VIRTUAL_HEIGHT - 44, 20, WHITE);
-    }
+    Rectangle globalBackBtn = { 28.0f, VIRTUAL_HEIGHT - 60.0f, 150.0f, 42.0f };
+    Ui::DrawMenuButton(globalBackBtn, menuFont, "BACK", hoverGlobalBack, false, true);
+
+    Ui::DrawStatusBanner(menuFont, connectError.c_str(), true);
 
     EndTextureMode();
 }

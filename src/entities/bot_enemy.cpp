@@ -2,13 +2,25 @@
 #include <cmath>
 #include <cstdlib>
 
+// Static demo-mode flag (false by default — only MenuBackground flips it on)
+bool BotEnemy::demoMode = false;
+void BotEnemy::SetDemoMode(bool enabled) { demoMode = enabled; }
 
-const float BOT_SPEED = 100.0f;
+// ---- Gameplay constants (normal bots) ----
+const float BOT_SPEED          = 100.0f;
 const float BOT_SHOOT_COOLDOWN = 1.5f;
-const float BOT_AGGRO_RANGE = 800.0f;
-const float BOT_MOVE_RANGE = 500.0f; 
+const float BOT_AGGRO_RANGE    = 800.0f;
+const float BOT_MOVE_RANGE     = 500.0f;
+
+// ---- Spectator / demo constants (menu background bots) ----
+const float DEMO_SPEED          = 185.0f;  // snappier movement
+const float DEMO_SHOOT_COOLDOWN = 0.65f;   // faster fire rate
+const float DEMO_AGGRO_RANGE    = 950.0f;
+const float DEMO_MOVE_RANGE     =  60.0f;  // always closing in
+
 BotEnemy::BotEnemy(Vector2 startPosition, const std::string& assetPath)
-    : Character(startPosition, assetPath, 0.08f), stateTimer(0.0f), isMoving(false), deathTimer(0.0f) {
+    : Character(startPosition, assetPath, 0.08f), stateTimer(0.0f), isMoving(false), deathTimer(0.0f),
+      strafeDir(1.0f), strafeTimer(0.0f) {
     this->speed = BOT_SPEED;
     this->shootCooldown = BOT_SHOOT_COOLDOWN;
     this->health = 100.0f;
@@ -78,7 +90,7 @@ void BotEnemy::UpdateAI(float deltaTime, Vector2 playerPosition) {
     if (isMonster) {
         // --- MONSTER MELEE AI: always chase aggressively, no shooting ---
         // Monsters are not allowed to use shield or dash — those skills are reserved for players and ranged bots.
-        float monsterSpeed = speed * 1.8f; // faster than bots
+        float monsterSpeed = (demoMode ? DEMO_SPEED : speed) * 1.8f; // faster than bots
 
         if (distance > 45.0f) {
             velocity.x = (dx / distance) * monsterSpeed;
@@ -92,8 +104,112 @@ void BotEnemy::UpdateAI(float deltaTime, Vector2 playerPosition) {
         position.x += velocity.x * deltaTime;
         position.y += velocity.y * deltaTime;
         // Melee damage is handled in main_level.cpp (CheckCollisions / contact damage)
+    } else if (demoMode) {
+        // ---- DEMO / SPECTATOR MODE — professional-looking ranged AI ----
+        // Always active, always repositioning. Looks like a skilled player:
+        // strafes while shooting, dashes aggressively, jumps frequently.
+
+        // --- State timer for repositioning ---
+        stateTimer -= deltaTime;
+        if (stateTimer <= 0.0f) {
+            stateTimer = (float)GetRandomValue(3, 9) / 10.0f; // 0.3-0.9s (snappy decisions)
+
+            if (distance > DEMO_MOVE_RANGE) {
+                // Close-in with slight random offset so they don't stack perfectly
+                isMoving = true;
+                float offX = (float)GetRandomValue(-120, 120);
+                float offY = (float)GetRandomValue(-120, 120);
+                targetPosition = { playerPosition.x + offX, playerPosition.y + offY };
+            } else {
+                // Already in range — hold position or strafe
+                isMoving = GetRandomValue(0, 1) == 1; // 50% chance to stay and shoot
+            }
+        }
+
+        // --- Strafe timer: lateral movement while at short range ---
+        strafeTimer -= deltaTime;
+        if (strafeTimer <= 0.0f) {
+            // Pick a new strafe direction every 0.4-0.9s
+            strafeDir = (GetRandomValue(0, 1) == 0) ? 1.0f : -1.0f;
+            strafeTimer = (float)GetRandomValue(4, 9) / 10.0f;
+        }
+
+        // Perpendicular (strafe) direction
+        float perpX = 0.0f, perpY = 0.0f;
+        if (distance > 0.01f) {
+            perpX = -(dy / distance) * strafeDir;
+            perpY =  (dx / distance) * strafeDir;
+        }
+
+        if (isMoving) {
+            float tDx = targetPosition.x - position.x;
+            float tDy = targetPosition.y - position.y;
+            float tDist = sqrtf(tDx*tDx + tDy*tDy);
+
+            if (tDist > 10.0f) {
+                // Blend approach + strafe for fluid movement
+                float approachX = (tDx / tDist) * DEMO_SPEED * 0.7f;
+                float approachY = (tDy / tDist) * DEMO_SPEED * 0.7f;
+                float strafeX   = perpX * DEMO_SPEED * 0.5f;
+                float strafeY   = perpY * DEMO_SPEED * 0.5f;
+                velocity.x = approachX + strafeX;
+                velocity.y = approachY + strafeY;
+                SetState(CharState::WALK);
+            } else {
+                // Arrived — strafe only
+                velocity.x = perpX * DEMO_SPEED * 0.55f;
+                velocity.y = perpY * DEMO_SPEED * 0.55f;
+                SetState(velocity.x != 0.0f || velocity.y != 0.0f ? CharState::WALK : CharState::IDLE);
+            }
+        } else {
+            // Not closing — pure strafe
+            velocity.x = perpX * DEMO_SPEED * 0.45f;
+            velocity.y = perpY * DEMO_SPEED * 0.45f;
+            SetState(CharState::WALK);
+        }
+
+        // --- Frequent jump (acrobatic feel) ---
+        bool isOnGround = (jumpHeight <= floorHeight + 1.0f && jumpVelocity <= 0.0f);
+        bool startedJump = false;
+        if (isOnGround && GetRandomValue(0, 55) == 0) { // ~1/60 chance per frame
+            jumpVelocity = 420.0f;
+            startedJump = true;
+        }
+
+        // --- Aggressive dash toward target ---
+        if (distance > 200.0f && GetRandomValue(0, 45) == 0) { // ~1/50 per frame
+            ActivateDash({ dx, dy });
+        }
+        // --- Shield when low health ---
+        if (health < 45.0f && GetRandomValue(0, 60) == 0) {
+            ActivateShield();
+        }
+
+        position.x += velocity.x * deltaTime;
+        position.y += velocity.y * deltaTime;
+
+        // --- Shoot aggressively if in range ---
+        if (distance < DEMO_AGGRO_RANGE && currentShootCooldown <= 0.0f) {
+            Shoot(playerPosition);
+            // Randomize cooldown slightly so bursts don't all fire at once
+            currentShootCooldown = DEMO_SHOOT_COOLDOWN + ((float)GetRandomValue(0, 8) / 20.0f);
+            // Change strafe direction after each shot (evasive maneuver)
+            strafeDir = -strafeDir;
+            strafeTimer = (float)GetRandomValue(3, 7) / 10.0f;
+        }
+
+        // ---- Jump/fall state overrides ----
+        if (!isOnGround && jumpVelocity > 0.0f) {
+            if (startedJump || currentState != CharState::JUMP_START)
+                SetState(CharState::JUMP_START);
+        } else if (!isOnGround && jumpVelocity <= 0.0f) {
+            SetState(CharState::FALL);
+        } else if (isOnGround && (currentState == CharState::JUMP_START || currentState == CharState::FALL)) {
+            SetState(CharState::JUMP_END);
+        }
+
     } else {
-        // --- BOT RANGED AI ---
+        // --- BOT RANGED AI (normal gameplay) ---
         stateTimer -= deltaTime;
         if (stateTimer <= 0.0f) {
             stateTimer = (float)GetRandomValue(10, 25) / 10.0f;

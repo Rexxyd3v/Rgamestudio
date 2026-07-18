@@ -31,7 +31,7 @@ jobs:
         shell: msys2 {0}
         run: |
           mkdir -p bin
-          g++ src/*.cpp src/screens/*.cpp src/utils/*.cpp src/entities/*.cpp src/network/*.cpp \
+          g++ src/*.cpp src/screens/*.cpp src/utils/*.cpp src/entities/*.cpp src/network/*.cpp src/ui/*.cpp \
             -o bin/Rgamestudio.exe \
             -lraylib -lenet -lws2_32 -lopengl32 -lgdi32 -lwinmm \
             -O2 -std=c++17

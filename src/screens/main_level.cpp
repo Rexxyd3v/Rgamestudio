@@ -232,77 +232,42 @@ Character* GameplayScreen::GetNearestEnemy(Vector2 pos) {
     return nearest;
 }
 
-// Trunk-only tree collision + rock collision (AABB vs AABB)
+// AABB minimum-overlap push-out. Separates `c` from obstacle rectangle `ob`
+// along whichever axis has the smallest penetration depth (SAT / MTV).
+static void PushOut(Character* c, const Rectangle& ob) {
+    Rectangle cb = c->GetCollisionBounds();
+    if (!CheckCollisionRecs(cb, ob)) return;
+
+    float oL = (cb.x + cb.width)  - ob.x;           // penetration pushing left
+    float oR = (ob.x + ob.width)  - cb.x;           // penetration pushing right
+    float oT = (cb.y + cb.height) - ob.y;           // penetration pushing up
+    float oB = (ob.y + ob.height) - cb.y;           // penetration pushing down
+
+    Vector2 pos = c->GetPosition();
+    if (std::min(oL, oR) < std::min(oT, oB)) {
+        // Separate on X (less penetration horizontally)
+        pos.x += (oL < oR) ? -oL : oR;
+    } else {
+        // Separate on Y
+        pos.y += (oT < oB) ? -oT : oB;
+    }
+    c->SetPosition(pos);
+}
+
+// Resolve tree-trunk + rock collisions for a single character.
+// Two passes handle corner cases where correcting one collider re-overlaps another
+// (common when a character is wedged between a rock and a tree trunk).
 void GameplayScreen::ResolveWorldCollision(Character* c) {
     if (!c) return;
 
-    // Try to resolve by reverting movement if the *new* position intersects
-    // any solid world collider.
-    Rectangle cb = c->GetCollisionBounds();
-
-    // Trees: trunk only (leaves are non-solid)
-    for (const auto& t : trees) {
-        Rectangle tb = t.TrunkBounds();
-        if (CheckCollisionRecs(cb, tb)) {
-            // Cancel movement by reverting position on both axes.
-            // Assumes Character movement already applied; we simply back out
-            // the last displacement by using the previous position stored in
-            // UpdatePhysics-driven logic is not available here.
-            //
-            // Current Character implementations directly mutate `position`.
-            // To cancel correctly we must undo the last move from inside
-            // Character. For now: approximate by pushing character out minimally
-            // along the smallest overlap axis.
-
-            float overlapLeft   = cb.x + cb.width  - tb.x;
-            float overlapRight  = (tb.x + tb.width) - cb.x;
-            float overlapTop    = cb.y + cb.height - tb.y;
-            float overlapBottom = (tb.y + tb.height) - cb.y;
-
-            // Choose the axis with least penetration to separate.
-            bool separateX = (std::min(overlapLeft, overlapRight) < std::min(overlapTop, overlapBottom));
-            if (separateX) {
-                if (overlapLeft < overlapRight) {
-                    c->SetPosition({ c->GetPosition().x - overlapLeft, c->GetPosition().y });
-                } else {
-                    c->SetPosition({ c->GetPosition().x + overlapRight, c->GetPosition().y });
-                }
-            } else {
-                if (overlapTop < overlapBottom) {
-                    c->SetPosition({ c->GetPosition().x, c->GetPosition().y - overlapTop });
-                } else {
-                    c->SetPosition({ c->GetPosition().x, c->GetPosition().y + overlapBottom });
-                }
-            }
-
-            cb = c->GetCollisionBounds();
+    for (int pass = 0; pass < 2; ++pass) {
+        // Trees: only the trunk is solid \u2014 leaves are walk-through
+        for (const auto& t : trees) {
+            PushOut(c, t.TrunkBounds());
         }
-    }
-
-    // Rocks: solid
-    for (const auto& r : rocks) {
-        Rectangle rb = r.CollisionBounds();
-        if (CheckCollisionRecs(cb, rb)) {
-            float overlapLeft   = cb.x + cb.width  - rb.x;
-            float overlapRight  = (rb.x + rb.width) - cb.x;
-            float overlapTop    = cb.y + cb.height - rb.y;
-            float overlapBottom = (rb.y + rb.height) - cb.y;
-
-            bool separateX = (std::min(overlapLeft, overlapRight) < std::min(overlapTop, overlapBottom));
-            if (separateX) {
-                if (overlapLeft < overlapRight) {
-                    c->SetPosition({ c->GetPosition().x - overlapLeft, c->GetPosition().y });
-                } else {
-                    c->SetPosition({ c->GetPosition().x + overlapRight, c->GetPosition().y });
-                }
-            } else {
-                if (overlapTop < overlapBottom) {
-                    c->SetPosition({ c->GetPosition().x, c->GetPosition().y - overlapTop });
-                } else {
-                    c->SetPosition({ c->GetPosition().x, c->GetPosition().y + overlapBottom });
-                }
-            }
-            cb = c->GetCollisionBounds();
+        // Rocks: full collision box
+        for (const auto& r : rocks) {
+            PushOut(c, r.CollisionBounds());
         }
     }
 }
@@ -717,14 +682,6 @@ void GameplayScreen::Draw(RenderTexture2D target) {
         it.draw = [&r]() {
             if (!r.tex || r.tex->id == 0) return;
 
-            // shadow
-            float wS = r.tex->width * r.scale * 1.1f;
-            float hS = r.tex->height * r.scale * 0.4f;
-            Vector2 origS = { wS / 2.0f, 0.0f };
-            Rectangle srcS = { 0, 0, (float)r.tex->width, (float)r.tex->height };
-            Rectangle dstS = { r.position.x + 6, r.position.y + 9, wS, hS };
-            DrawTexturePro(*r.tex, srcS, dstS, origS, r.rotation * 0.5f, {0,0,0,50});
-
             // rock sprite
             float w = r.tex->width  * r.scale;
             float h = r.tex->height * r.scale;
@@ -770,6 +727,11 @@ void GameplayScreen::Draw(RenderTexture2D target) {
         it.draw();
     }
 
+    // Draw Character UIs (health bars, names) on top of all depth-sorted world objects
+    player->DrawUI();
+    if (player2) player2->DrawUI();
+    for (auto* rp : remotePlayers) rp->DrawUI();
+    for (auto* b : offlineBots) b->DrawUI();
 
     EndMode2D();
 
