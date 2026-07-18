@@ -7,10 +7,11 @@ static const std::string DEFAULT_CHAR_PATH =
     "Free 2D Animated Vector Game Character Sprites/"
     "Full body animated characters/Char 1/with hands/";
 
-Player::Player(Vector2 startPosition, int playerIndex, const std::string& skinPath)
+Player::Player(Vector2 startPosition, int playerIndex, const std::string& skinPath, int weaponSkin)
     : Character(startPosition,
                 skinPath.empty() ? DEFAULT_CHAR_PATH : skinPath,
-                CHAR_SCALE),
+                CHAR_SCALE,
+                weaponSkin),
       playerIndex(playerIndex) {
 }
 

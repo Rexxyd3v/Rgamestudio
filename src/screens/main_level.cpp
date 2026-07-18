@@ -17,13 +17,21 @@ static float netSendTimer = 0.0f;
 static const float NET_SEND_RATE = 1.0f / 30.0f; // Send 30 updates per second
 
 GameplayScreen::GameplayScreen(GameMode mode) : currentMode(mode), spawnTimer(0.0f), netSendTimer(0.0f), worldTime(0.0f) {
-    std::string bgPath = "assets/Maps/Beach/";
+    // Dynamically pick map folder based on lobby selection
+    int mapId = NetworkManager::GetInstance().selectedMapId;
+    std::string bgPath;
+    switch (mapId) {
+        case 1:  bgPath = "assets/Maps/Space/";  break;
+        case 2:  bgPath = "assets/Maps/Forest/"; break;
+        default: bgPath = "assets/Maps/Beach/";  break;
+    }
+
     bgTex1   = TextureManager::GetTexture(bgPath + "background.png");
-    bgTex2   = TextureManager::GetTexture(bgPath + "background.png"); // Using same for now
-    bgDetail = TextureManager::GetTexture(bgPath + "background.png"); // Using same for now
+    bgTex2   = TextureManager::GetTexture(bgPath + "background.png");
+    bgDetail = TextureManager::GetTexture(bgPath + "background.png");
     rockTex  = TextureManager::GetTexture(bgPath + "rocks.png");
-    rockTex1 = TextureManager::GetTexture(bgPath + "rocks.png"); // Using same for now
-    rockTex2 = TextureManager::GetTexture(bgPath + "rocks.png"); // Using same for now
+    rockTex1 = TextureManager::GetTexture(bgPath + "rocks.png");
+    rockTex2 = TextureManager::GetTexture(bgPath + "rocks.png");
     // Load all 9 health bar animation frames
     for (int i = 0; i < 9; i++) {
         healthBarFrames[i] = TextureManager::GetTexture(
@@ -36,9 +44,9 @@ GameplayScreen::GameplayScreen(GameMode mode) : currentMode(mode), spawnTimer(0.
             "assets/DashBar/dash" + std::to_string(i + 1) + ".png");
     }
 
-    // Load palm tree textures for beach decoration
-    palmTree1 = TextureManager::GetTexture("assets/Maps/Beach/tree1.png");
-    palmTree2 = TextureManager::GetTexture("assets/Maps/Beach/tree2.png");
+    // Load decorative foreground objects from the map folder
+    palmTree1 = TextureManager::GetTexture(bgPath + "tree1.png");
+    palmTree2 = TextureManager::GetTexture(bgPath + "tree2.png");
 
     // Load the character head portrait for the HUD circle (use the player's selected skin)
     {
@@ -52,17 +60,13 @@ GameplayScreen::GameplayScreen(GameMode mode) : currentMode(mode), spawnTimer(0.
         }
     }
 
-    // Load palm tree textures for beach decoration
-    palmTree1 = TextureManager::GetTexture("assets/Maps/Beach/tree1.png");
-    palmTree2 = TextureManager::GetTexture("assets/Maps/Beach/tree2.png");
-
     // Player starts near center of world, using selected skin
     {
         std::string charPath = "assets/Free 2D Animated Vector Game Character Sprites/Free 2D Animated Vector Game Character Sprites/Full body animated characters/";
         int skinIdx = NetworkManager::GetInstance().localSkinIndex;
         if (skinIdx < 1 || skinIdx > 4) skinIdx = 1;
         std::string skinPath = charPath + "Char " + std::to_string(skinIdx) + "/with hands/";
-        player = new Player({WORLD_WIDTH / 2.0f - 50.0f, WORLD_HEIGHT / 2.0f}, 0, skinPath);
+        player = new Player({WORLD_WIDTH / 2.0f - 50.0f, WORLD_HEIGHT / 2.0f}, 0, skinPath, NetworkManager::GetInstance().localWeaponSkin);
         player->SetName(NetworkManager::GetInstance().localUsername.empty() ? "You" : NetworkManager::GetInstance().localUsername);
     }
     // In online mode player2 is a remote player, so we don't spawn them locally
@@ -497,6 +501,7 @@ bool GameplayScreen::Update(float deltaTime) {
             std::strncpy(pkt.username, NetworkManager::GetInstance().localUsername.c_str(), sizeof(pkt.username) - 1);
             pkt.username[sizeof(pkt.username) - 1] = '\0';
             pkt.charSkin      = NetworkManager::GetInstance().localSkinIndex;
+            pkt.weaponSkin    = NetworkManager::GetInstance().localWeaponSkin;
 
             NetworkManager::GetInstance().SendPacket(&pkt, sizeof(pkt), false);
         }
@@ -526,6 +531,7 @@ bool GameplayScreen::Update(float deltaTime) {
             resPkt.header.playerID = NetworkManager::GetInstance().GetLocalPlayerID();
             resPkt.spawnPosition = spawnPos;
             resPkt.charSkin = NetworkManager::GetInstance().localSkinIndex;
+            resPkt.weaponSkin = NetworkManager::GetInstance().localWeaponSkin;
             NetworkManager::GetInstance().SendPacket(&resPkt, sizeof(resPkt), true);
         }
 
@@ -912,53 +918,121 @@ void GameplayScreen::Draw(RenderTexture2D target) {
         DrawText("Press R to Respawn", VIRTUAL_WIDTH/2 - 90, VIRTUAL_HEIGHT/2 + 40, 20, RAYWHITE);
     }
 
-    // Scoreboard / Leaderboard
+    // ── Scoreboard (TAB) ──────────────────────────────────────────────────────
     if (IsKeyDown(KEY_TAB)) {
+        Font sbFont = GetFontDefault();
+
+        // Collect entries
+        struct SBEntry { std::string name; int kills; int deaths; bool isLocal; bool isMonster; };
+        std::vector<SBEntry> board;
+
         if (currentMode == GameMode::ONLINE) {
-            DrawRectangle(VIRTUAL_WIDTH/2 - 200, 100, 400, 300, {0, 0, 0, 200});
-            DrawText("SCOREBOARD", VIRTUAL_WIDTH/2 - MeasureText("SCOREBOARD", 20)/2, 110, 20, WHITE);
-            int y = 150;
-            DrawText(TextFormat("%s : %d Kills / %d Deaths", NetworkManager::GetInstance().localUsername.c_str(), NetworkManager::GetInstance().localKills, NetworkManager::GetInstance().localDeaths), VIRTUAL_WIDTH/2 - 180, y, 16, GREEN);
-            y += 25;
+            board.push_back({
+                NetworkManager::GetInstance().localUsername.empty() ? "You" : NetworkManager::GetInstance().localUsername,
+                NetworkManager::GetInstance().localKills,
+                NetworkManager::GetInstance().localDeaths,
+                true, false
+            });
             for (auto rp : remotePlayers) {
-                DrawText(TextFormat("%s : %d Kills / %d Deaths", rp->username.c_str(), rp->kills, rp->deaths), VIRTUAL_WIDTH/2 - 180, y, 16, RAYWHITE);
-                y += 25;
+                board.push_back({ rp->username.empty() ? "Player" : rp->username, rp->kills, rp->deaths, false, false });
             }
-        } else if (currentMode == GameMode::OFFLINE) {
-            // --- Offline Leaderboard ---
-            // Build sorted list: player + bots
-            struct LBEntry { std::string name; int kills; int deaths; bool isPlayer; bool isMonster; };
-            std::vector<LBEntry> board;
+        } else {
             board.push_back({ player->GetName().empty() ? "You" : player->GetName(), player->GetKills(), player->GetDeaths(), true, false });
             for (auto b : offlineBots) {
                 board.push_back({ b->GetName().empty() ? "Bot" : b->GetName(), b->GetKills(), b->GetDeaths(), false, b->IsMonster() });
             }
-            // Sort by kills descending
-            for (int i = 0; i < (int)board.size(); i++) {
-                for (int j = i+1; j < (int)board.size(); j++) {
-                    if (board[j].kills > board[i].kills) std::swap(board[i], board[j]);
-                }
-            }
-
-            int boardW = 500;
-            int boardH = 40 + (int)board.size() * 26 + 20;
-            int boardX = VIRTUAL_WIDTH/2 - boardW/2;
-            int boardY = 80;
-            DrawRectangle(boardX, boardY, boardW, boardH, {10, 10, 30, 220});
-            DrawRectangleLines(boardX, boardY, boardW, boardH, {100, 150, 255, 200});
-            DrawText("LEADERBOARD [TAB]", boardX + boardW/2 - MeasureText("LEADERBOARD [TAB]", 18)/2, boardY + 8, 18, {255, 220, 60, 255});
-
-            int ey = boardY + 38;
-            for (int i = 0; i < (int)board.size(); i++) {
-                Color monsterColor = { 255, 100, 100, 255 };
-                Color entryColor = board[i].isPlayer ? GREEN : (board[i].isMonster ? monsterColor : RAYWHITE);
-                const char* medal = (i == 0) ? "#1 " : (i == 1) ? "#2 " : (i == 2) ? "#3 " : "   ";
-                const char* tag = board[i].isMonster ? " [MONSTER]" : (board[i].isPlayer ? " [YOU]" : " [BOT]");
-                DrawText(TextFormat("%s%s%s  K:%d  D:%d", medal, board[i].name.c_str(), tag, board[i].kills, board[i].deaths),
-                         boardX + 14, ey, 14, entryColor);
-                ey += 26;
-            }
         }
+
+        // Sort by kills descending
+        std::sort(board.begin(), board.end(), [](const SBEntry& a, const SBEntry& b) {
+            return a.kills > b.kills;
+        });
+
+        // Layout
+        const int rowH    = 32;
+        const int headerH = 54;
+        const int footerH = 16;
+        int panelW = 560;
+        int panelH = headerH + (int)board.size() * rowH + footerH + 16;
+        int panelX = VIRTUAL_WIDTH  / 2 - panelW / 2;
+        int panelY = VIRTUAL_HEIGHT / 2 - panelH / 2;
+
+        // Outer glass panel
+        DrawRectangle(panelX, panelY, panelW, panelH, { 8, 10, 22, 230 });
+        DrawRectangleLines(panelX, panelY, panelW, panelH, { 200, 160, 60, 160 });
+        DrawRectangleLines(panelX + 1, panelY + 1, panelW - 2, panelH - 2, { 200, 160, 60, 60 });
+
+        // Gold accent top bar
+        DrawRectangle(panelX, panelY, panelW, 3, { 200, 160, 60, 255 });
+
+        // Title
+        const char* title = (currentMode == GameMode::ONLINE) ? "SCOREBOARD" : "LEADERBOARD";
+        Vector2 titleSz = MeasureTextEx(sbFont, title, 22.0f, 1.5f);
+        DrawTextEx(sbFont, title,
+            { panelX + panelW * 0.5f - titleSz.x * 0.5f, (float)panelY + 10.0f },
+            22.0f, 1.5f, { 220, 180, 60, 255 });
+
+        // Column headers
+        int hy = panelY + headerH - 18;
+        DrawTextEx(sbFont, "PLAYER",  { (float)panelX + 60,           (float)hy }, 11.0f, 1.0f, { 120, 140, 180, 200 });
+        DrawTextEx(sbFont, "KILLS",   { (float)panelX + panelW - 160, (float)hy }, 11.0f, 1.0f, { 120, 140, 180, 200 });
+        DrawTextEx(sbFont, "DEATHS",  { (float)panelX + panelW -  72, (float)hy }, 11.0f, 1.0f, { 120, 140, 180, 200 });
+        DrawLine(panelX + 10, panelY + headerH - 2, panelX + panelW - 10, panelY + headerH - 2, { 200, 160, 60, 80 });
+
+        // Rows
+        for (int i = 0; i < (int)board.size(); i++) {
+            int ry = panelY + headerH + i * rowH;
+
+            // Row highlight for local player
+            if (board[i].isLocal) {
+                DrawRectangle(panelX + 4, ry + 2, panelW - 8, rowH - 4, { 40, 60, 30, 80 });
+            } else if (i % 2 == 0) {
+                DrawRectangle(panelX + 4, ry + 2, panelW - 8, rowH - 4, { 255, 255, 255, 8 });
+            }
+
+            // Rank medal
+            const char* rank = (i == 0) ? "#1" : (i == 1) ? "#2" : (i == 2) ? "#3" : TextFormat("#%d", i + 1);
+            Color rankColor = (i == 0) ? Color{ 255, 200, 50, 255 } :
+                              (i == 1) ? Color{ 180, 200, 220, 255 } :
+                              (i == 2) ? Color{ 200, 130, 80, 255 } :
+                                         Color{ 120, 130, 150, 200 };
+            DrawTextEx(sbFont, rank, { (float)panelX + 12, (float)ry + 8 }, 14.0f, 1.0f, rankColor);
+
+            // Name + tag
+            Color nameColor = board[i].isLocal    ? Color{ 100, 230, 100, 255 } :
+                              board[i].isMonster  ? Color{ 255, 100,  80, 255 } :
+                                                   Color{ 210, 215, 230, 240 };
+            const char* tag = board[i].isLocal   ? " [YOU]"    :
+                              board[i].isMonster ? " [MONSTER]" : " [BOT]";
+            std::string displayName = board[i].name + (currentMode == GameMode::OFFLINE ? tag : "");
+            DrawTextEx(sbFont, displayName.c_str(), { (float)panelX + 60, (float)ry + 8 }, 14.0f, 1.0f, nameColor);
+
+            // Kills
+            std::string killStr = std::to_string(board[i].kills);
+            Vector2 ksz = MeasureTextEx(sbFont, killStr.c_str(), 14.0f, 1.0f);
+            DrawTextEx(sbFont, killStr.c_str(),
+                { (float)panelX + panelW - 160 + 20 - ksz.x * 0.5f, (float)ry + 8 },
+                14.0f, 1.0f, { 100, 220, 120, 255 });
+
+            // Deaths
+            std::string deathStr = std::to_string(board[i].deaths);
+            Vector2 dsz = MeasureTextEx(sbFont, deathStr.c_str(), 14.0f, 1.0f);
+            DrawTextEx(sbFont, deathStr.c_str(),
+                { (float)panelX + panelW - 72 + 20 - dsz.x * 0.5f, (float)ry + 8 },
+                14.0f, 1.0f, { 220, 100, 100, 255 });
+
+            // Row separator
+            if (i < (int)board.size() - 1)
+                DrawLine(panelX + 10, ry + rowH, panelX + panelW - 10, ry + rowH, { 255, 255, 255, 18 });
+        }
+
+        // Footer hint
+        const char* hint = "Hold [TAB] to view";
+        Vector2 hsz = MeasureTextEx(sbFont, hint, 10.0f, 1.0f);
+        DrawTextEx(sbFont, hint,
+            { panelX + panelW * 0.5f - hsz.x * 0.5f,
+              (float)(panelY + headerH + (int)board.size() * rowH + 6) },
+            10.0f, 1.0f, { 120, 130, 150, 160 });
     }
 
     // Crosshair (custom cursor) - draw at mouse position in screen space
@@ -998,10 +1072,12 @@ const int DEFAULT_PLAYER_SKIN = 1;
 
 // Find a RemotePlayer by authoritative playerID, or create one if it's new.
 // Always keyed by the host-assigned playerID — never by ENet incomingPeerID.
-RemotePlayer* GameplayScreen::FindOrCreateRemotePlayer(uint32_t playerID, int charSkin) {
+RemotePlayer* GameplayScreen::FindOrCreateRemotePlayer(uint32_t playerID, int charSkin, int weaponSkin) {
     for (int i = 0; i < (int)remotePlayers.size(); i++) {
         if (remotePlayers[i]->peerID == playerID) {
-            // Update the skin in case it changed (e.g., lobby -> game transition).
+            // Update the weapon skin in case it changed (e.g., during gameplay).
+            remotePlayers[i]->SetRemoteWeaponSkin(weaponSkin);
+            // Note: character skin is not updated during gameplay to avoid reload cost.
             return remotePlayers[i];
         }
     }
@@ -1012,7 +1088,8 @@ RemotePlayer* GameplayScreen::FindOrCreateRemotePlayer(uint32_t playerID, int ch
 
     RemotePlayer* rp = new RemotePlayer(
         {WORLD_WIDTH / 2.0f + 100.0f, WORLD_HEIGHT / 2.0f},
-        charPath + "Char " + std::to_string(charSkin) + "/with hands/"
+        charPath + "Char " + std::to_string(charSkin) + "/with hands/",
+        weaponSkin
     );
     rp->peerID = playerID;
     remotePlayers.push_back(rp);
@@ -1058,7 +1135,7 @@ void GameplayScreen::PollNetworkEvents(float deltaTime) {
             PacketPlayerUpdate pkt;
             std::memcpy(&pkt, ev.data.data(), sizeof(PacketPlayerUpdate));
 
-            RemotePlayer* rp = FindOrCreateRemotePlayer(pkt.header.playerID, pkt.charSkin);
+            RemotePlayer* rp = FindOrCreateRemotePlayer(pkt.header.playerID, pkt.charSkin, pkt.weaponSkin);
             rp->username = std::string(pkt.username);
             // Keep the inherited Character::name in sync so the head-label draw code uses the latest username.
             rp->SetName(rp->username);
@@ -1068,7 +1145,7 @@ void GameplayScreen::PollNetworkEvents(float deltaTime) {
             PacketPlayerShoot pkt;
             std::memcpy(&pkt, ev.data.data(), sizeof(PacketPlayerShoot));
 
-            RemotePlayer* rp = FindOrCreateRemotePlayer(pkt.header.playerID, DEFAULT_PLAYER_SKIN);
+            RemotePlayer* rp = FindOrCreateRemotePlayer(pkt.header.playerID, DEFAULT_PLAYER_SKIN, 0);
             rp->SetFaceDirection(pkt.aimDir.x < 0 ? -1 : 1);
             rp->lastAimDir = pkt.aimDir; // store aim direction for rendering
             rp->ShootInDirection(pkt.aimDir);
@@ -1097,17 +1174,17 @@ void GameplayScreen::PollNetworkEvents(float deltaTime) {
             if (pkt.killerPlayerID == myPlayerID) {
                 NetworkManager::GetInstance().localKills++;
             } else {
-                RemotePlayer* rp = FindOrCreateRemotePlayer(pkt.killerPlayerID, DEFAULT_PLAYER_SKIN);
+                RemotePlayer* rp = FindOrCreateRemotePlayer(pkt.killerPlayerID, DEFAULT_PLAYER_SKIN, 0);
                 rp->kills++;
             }
             if (pkt.victimPlayerID != myPlayerID) {
-                RemotePlayer* rp = FindOrCreateRemotePlayer(pkt.victimPlayerID, DEFAULT_PLAYER_SKIN);
+                RemotePlayer* rp = FindOrCreateRemotePlayer(pkt.victimPlayerID, DEFAULT_PLAYER_SKIN, 0);
                 rp->deaths++;
             }
         } else if (header.type == PacketType::PLAYER_RESPAWN && ev.data.size() >= sizeof(PacketPlayerRespawn)) {
             PacketPlayerRespawn pkt;
             std::memcpy(&pkt, ev.data.data(), sizeof(PacketPlayerRespawn));
-            RemotePlayer* rp = FindOrCreateRemotePlayer(pkt.header.playerID, pkt.charSkin);
+            RemotePlayer* rp = FindOrCreateRemotePlayer(pkt.header.playerID, pkt.charSkin, pkt.weaponSkin);
             rp->ResetHealth(100.0f);
             rp->SetPosition(pkt.spawnPosition);
         } else if (header.type == PacketType::PLAYER_DISCONNECT && ev.data.size() >= sizeof(PacketPlayerDisconnectHeader)) {

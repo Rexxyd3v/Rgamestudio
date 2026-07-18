@@ -2,6 +2,7 @@
 #include "../utils/texture_manager.h"
 #include <math.h>
 #include <iostream>
+#include "../ui/weapon_skin_catalog.h"
 
 struct WeaponStats {
     int maxAmmo;
@@ -60,7 +61,7 @@ static void PlayWeaponSound(int index) {
     }
 }
 
-Character::Character(Vector2 startPosition, const std::string& assetPath, float scale)
+Character::Character(Vector2 startPosition, const std::string& assetPath, float scale, int weaponSkin)
     : position(startPosition), faceDirection(1), currentState(CharState::IDLE),
       scale(scale), health(100.0f), speed(150.0f), shootCooldown(0.15f), currentShootCooldown(0.0f),
       jumpHeight(0.0f), jumpVelocity(0.0f), baseHeight(0.0f), floorHeight(0.0f), feetOffset(10.0f), weaponRotation(0.0f),
@@ -81,10 +82,14 @@ Character::Character(Vector2 startPosition, const std::string& assetPath, float 
     LoadAnimations(assetPath);
 
     currentWeaponIndex = 0;
-    std::string weaponPath = "assets/Free 2D Animated Vector Game Character Sprites/Free 2D Animated Vector Game Character Sprites/Weapons/";
-    weaponTextures.push_back(TextureManager::GetTexture(weaponPath + "weaponR1.png"));
-    weaponTextures.push_back(TextureManager::GetTexture(weaponPath + "weaponR2.png"));
-    weaponTextures.push_back(TextureManager::GetTexture(weaponPath + "weaponR3.png"));
+    std::string skinPrefix = WeaponSkinPath(static_cast<WeaponSkinId>(weaponSkin));
+    if (skinPrefix.empty()) {
+        // Fallback to default skin if invalid
+        skinPrefix = "assets/WeaponSkins/Default/";
+    }
+    weaponTextures.push_back(TextureManager::GetTexture(skinPrefix + "weaponR1.png"));
+    weaponTextures.push_back(TextureManager::GetTexture(skinPrefix + "weaponR2.png"));
+    weaponTextures.push_back(TextureManager::GetTexture(skinPrefix + "weaponR3.png"));
 }
 
 Character::~Character() {
@@ -115,6 +120,32 @@ void Character::SetState(CharState newState) {
     if (currentState != newState) {
         currentState = newState;
         animations[currentState]->Reset();
+    }
+}
+
+void Character::SetWeaponSkin(int weaponSkin) {
+    // Clear existing weapon textures
+    for (auto& texture : weaponTextures) {
+        if (texture.id != 0) {
+            UnloadTexture(texture);
+        }
+    }
+    weaponTextures.clear();
+
+    // Load new weapon textures based on the weapon skin
+    std::string weaponPath = "assets/Free 2D Animated Vector Game Character Sprites/Free 2D Animated Vector Game Character Sprites/Weapons/";
+    std::string skinPrefix = WeaponSkinPath(static_cast<WeaponSkinId>(weaponSkin));
+    if (skinPrefix.empty()) {
+        // Fallback to default skin if invalid
+        skinPrefix = "assets/WeaponSkins/Default/";
+    }
+    weaponTextures.push_back(TextureManager::GetTexture(skinPrefix + "weaponR1.png"));
+    weaponTextures.push_back(TextureManager::GetTexture(skinPrefix + "weaponR2.png"));
+    weaponTextures.push_back(TextureManager::GetTexture(skinPrefix + "weaponR3.png"));
+
+    // Reset to first weapon if the current weapon index is out of bounds
+    if (currentWeaponIndex < 0 || currentWeaponIndex >= static_cast<int>(weaponTextures.size())) {
+        currentWeaponIndex = 0;
     }
 }
 

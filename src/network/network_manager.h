@@ -72,8 +72,10 @@ public:
 
     std::string localUsername;
     int localSkinIndex;
+    int localWeaponSkin;
     int localKills;
     int localDeaths;
+    int selectedMapId; // Map selection ID (0 = Beach)
 
 
 private:
@@ -100,10 +102,11 @@ private:
         uint32_t peerID;        // Authoritative playerID
         std::string username;
         int charSkin;
+        int weaponSkin;         // Weapon skin ID (0 = default)
         bool isReady;
 
-        PlayerInfo(uint32_t id, const std::string& name, int skin)
-            : peerID(id), username(name), charSkin(skin), isReady(false) {}
+        PlayerInfo(uint32_t id, const std::string& name, int skin, int weaponSkin)
+            : peerID(id), username(name), charSkin(skin), weaponSkin(weaponSkin), isReady(false) {}
     };
     std::vector<PlayerInfo> players;
 
@@ -124,9 +127,9 @@ public:
     const std::vector<PlayerInfo>& GetPlayers() const { return players; }
 
     // Add or update a player entry by authoritative playerID. Idempotent.
-    // If a player with the same ID already exists, updates username/skin. Otherwise inserts.
+    // If a player with the same ID already exists, updates username/skin/weaponSkin. Otherwise inserts.
     // Never creates duplicates and never generates a new ID.
-    void UpsertPlayer(uint32_t playerID, const std::string& username, int charSkin);
+    void UpsertPlayer(uint32_t playerID, const std::string& username, int charSkin, int weaponSkin);
 
     // Remove a player entry by authoritative playerID. Returns true if removed.
     bool RemovePlayer(uint32_t playerID);

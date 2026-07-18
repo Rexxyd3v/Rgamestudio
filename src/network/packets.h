@@ -18,7 +18,8 @@ enum class PacketType : uint8_t {
     PLAYER_DAMAGE,      // Event: player took damage
     PLAYER_KILLED,      // Event: player was killed by another (updates score)
     PLAYER_RESPAWN,     // Event: player respawned
-    GAME_START          // Host signals game should start
+    GAME_START,         // Host signals game should start
+    MAP_CHANGED         // Host signals selected map changed
 };
 
 // Base header for all packets
@@ -41,6 +42,7 @@ struct PacketPlayerConnect {
     PacketHeader header;
     char username[20];
     int charSkin;     // 1, 2, 3, or 4
+    int weaponSkin;   // WeaponSkinId enum value
 };
 
 struct PacketPlayerUpdate {
@@ -54,6 +56,7 @@ struct PacketPlayerUpdate {
     float jumpVelocity;
     char username[16];
     int charSkin;
+    int weaponSkin;        // WeaponSkinId enum value
 };
 
 struct PacketPlayerShoot {
@@ -77,6 +80,7 @@ struct PacketPlayerRespawn {
     PacketHeader header;
     Vector2 spawnPosition;
     int charSkin;  // Skin ID (1-4)
+    int weaponSkin; // WeaponSkinId enum value
 };
 
 struct PacketPlayerReady {
@@ -91,7 +95,12 @@ struct PacketPlayerDisconnectHeader {
 
 struct PacketGameStart {
     PacketHeader header;
-    // No additional data needed for now
+    int mapId; // MapId enum value
+};
+
+struct PacketMapChanged {
+    PacketHeader header;
+    int mapId; // MapId enum value
 };
 #pragma pack(pop)
 

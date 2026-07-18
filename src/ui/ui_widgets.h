@@ -6,6 +6,12 @@
 
 namespace Ui {
 
+struct GalleryItem {
+    Texture2D thumbnail;
+    const char* label;
+    bool locked;
+};
+
 void DrawVignette(float strength = 0.55f);
 
 void DrawGlassPanel(Rectangle bounds, float alpha = 1.0f);

@@ -21,7 +21,7 @@ enum class CharState {
 
 class Character {
 public:
-    Character(Vector2 startPosition, const std::string& assetPath, float scale);
+    Character(Vector2 startPosition, const std::string& assetPath, float scale, int weaponSkin = 0);
     virtual ~Character();
 
     virtual void Update(float deltaTime) = 0;
@@ -176,6 +176,7 @@ protected:
 
     void    LoadAnimations(const std::string& baseDir);
     void    SetState(CharState newState);
+    void    SetWeaponSkin(int weaponSkin);
 };
 
 #endif // CHARACTER_H

@@ -19,8 +19,10 @@ NetworkManager::NetworkManager()
       isConnected(false),
       localPlayerID(0),
       localSkinIndex(1),
+      localWeaponSkin(0), // default weapon skin
       localKills(0),
       localDeaths(0),
+      selectedMapId(0),   // default map Beach
       waitingForAssignment(false),
       nextPlayerID(1), // Host is always 0; clients start at 1, monotonically increasing
       joinState(JoinState::IDLE),
@@ -88,16 +90,17 @@ void NetworkManager::UnregisterPeerMapping(uint16_t incomingPeerID) {
     }
 }
 
-void NetworkManager::UpsertPlayer(uint32_t playerID, const std::string& username, int charSkin) {
+void NetworkManager::UpsertPlayer(uint32_t playerID, const std::string& username, int charSkin, int weaponSkin) {
     for (auto& p : players) {
         if (p.peerID == playerID) {
             // Update existing entry; do NOT change the ID.
             p.username = username;
             p.charSkin = charSkin;
+            p.weaponSkin = weaponSkin;
             return;
         }
     }
-    players.push_back(PlayerInfo(playerID, username, charSkin));
+    players.push_back(PlayerInfo(playerID, username, charSkin, weaponSkin));
 }
 
 bool NetworkManager::RemovePlayer(uint32_t playerID) {
@@ -130,7 +133,7 @@ bool NetworkManager::HostRoom(int port) {
     isConnected = true;
     localPlayerID = 0; 
 
-    UpsertPlayer(0, localUsername, localSkinIndex);
+    UpsertPlayer(0, localUsername, localSkinIndex, localWeaponSkin);
 
     std::cout << "Hosting room on port " << port << std::endl;
     return true;
@@ -386,7 +389,8 @@ void NetworkManager::Update() {
                     uint16_t incomingPeerID = event.peer->incomingPeerID;
                     uint32_t newPlayerID = AllocatePlayerID();
                     RegisterPeerMapping(incomingPeerID, newPlayerID);
-                    UpsertPlayer(newPlayerID, "Unknown", 1);
+                    UpsertPlayer(newPlayerID, "Unknown", 1, 0);
+
 
                     // Configure generous peer timeouts for internet/tunnel connections.
                     enet_peer_timeout(event.peer, 32, 5000, 30000);
@@ -445,6 +449,7 @@ void NetworkManager::Update() {
                     PacketType packetType = static_cast<PacketType>(netEvent.data[0]);
 
                     if (packetType == PacketType::ID_ASSIGNMENT) {
+
                         // CLIENT side: host just granted us an authoritative playerID.
                         if (netEvent.data.size() >= sizeof(PacketIDAssignment)) {
                             if (!isHost) {
@@ -465,6 +470,7 @@ void NetworkManager::Update() {
                                         sizeof(announce.username) - 1);
                                 announce.username[sizeof(announce.username) - 1] = '\0';
                                 announce.charSkin = localSkinIndex;
+                                announce.weaponSkin = localWeaponSkin;
                                 ENetPacket* p = enet_packet_create(
                                     &announce, sizeof(announce), ENET_PACKET_FLAG_RELIABLE);
                                 enet_peer_send(serverPeer, 0, p);
@@ -472,7 +478,7 @@ void NetworkManager::Update() {
                                 // Add ourselves to our own local player list too. (The host will
                                 // also send a PLAYER_CONNECT for us via the rebroadcast — but
                                 // adding it here is idempotent thanks to UpsertPlayer.)
-                                UpsertPlayer(localPlayerID, localUsername, localSkinIndex);
+                                UpsertPlayer(localPlayerID, localUsername, localSkinIndex, localWeaponSkin);
                             }
                             // Host ignores this packet type.
                         }
@@ -492,10 +498,11 @@ void NetworkManager::Update() {
                             uint32_t playerID = connectPacket->header.playerID;
                             std::string uname(connectPacket->username);
                             int skin = connectPacket->charSkin;
+                            int weaponSkin = connectPacket->weaponSkin;
 
                             // Dedupe + update in one shot. Never creates Unknown duplicates
                             // because the host always sends the canonical entry.
-                            UpsertPlayer(playerID, uname, skin);
+                            UpsertPlayer(playerID, uname, skin, weaponSkin);
 
                             if (isHost) {
                                 // Host: rebroadcast to all OTHER connected clients so they
@@ -543,6 +550,20 @@ void NetworkManager::Update() {
                         // the host to everyone else. The host's incomingPeerID-to-playerID map
                         // ensures the rebroadcasted packet always carries the correct
                         // authoritative playerID.
+                        // Update local player info with skin data.
+                        if (netEvent.data.size() >= sizeof(PacketPlayerUpdate)) {
+                            PacketPlayerUpdate* updatePacket =
+                                reinterpret_cast<PacketPlayerUpdate*>(netEvent.data.data());
+                            uint32_t playerID = updatePacket->header.playerID;
+                            // Preserve existing username if known.
+                            std::string username;
+                            if (auto* p = FindPlayer(playerID)) {
+                                username = p->username;
+                            }
+                            int charSkin = updatePacket->charSkin;
+                            int weaponSkin = updatePacket->weaponSkin;
+                            UpsertPlayer(playerID, username, charSkin, weaponSkin);
+                        }
                         if (isHost) {
                             for (size_t i = 0; i < host->peerCount; ++i) {
                                 ENetPeer* peer = &host->peers[i];
@@ -591,6 +612,19 @@ void NetworkManager::Update() {
                         }
                     } else if (packetType == PacketType::PLAYER_RESPAWN) {
                         if (isHost) {
+                            // Update player info from respawn packet
+                            if (netEvent.data.size() >= sizeof(PacketPlayerRespawn)) {
+                                PacketPlayerRespawn* respPacket =
+                                    reinterpret_cast<PacketPlayerRespawn*>(netEvent.data.data());
+                                uint32_t playerID = respPacket->header.playerID;
+                                int charSkin = respPacket->charSkin;
+                                int weaponSkin = respPacket->weaponSkin;
+                                // Preserve existing username
+                                const PlayerInfo* existing = FindPlayer(playerID);
+                                std::string username = existing ? existing->username : "";
+                                UpsertPlayer(playerID, username, charSkin, weaponSkin);
+                            }
+                            // Rebroadcast to other clients
                             for (size_t i = 0; i < host->peerCount; ++i) {
                                 ENetPeer* peer = &host->peers[i];
                                 if (peer == event.peer) continue;
@@ -770,6 +804,7 @@ bool NetworkManager::StartGame() {
     PacketGameStart startPacket{};
     startPacket.header.type = PacketType::GAME_START;
     startPacket.header.playerID = localPlayerID; // Host's ID is 0
+    startPacket.mapId = selectedMapId;
 
     SendPacket(&startPacket, sizeof(startPacket), true);
     return true;

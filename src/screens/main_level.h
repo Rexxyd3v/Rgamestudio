@@ -160,7 +160,8 @@ private:
 
     // Networking helpers
     void PollNetworkEvents(float deltaTime);
-    RemotePlayer* FindOrCreateRemotePlayer(uint32_t playerID, int charSkin);
+    RemotePlayer* FindOrCreateRemotePlayer(uint32_t playerID, int charSkin, int weaponSkin = 0);
+
     void RemoveRemotePlayer(uint32_t playerID);
 
     // Physics & collision helpers
@@ -173,5 +174,6 @@ private:
     Vector2 GetFarSpawnPoint();
     Character* GetNearestTargetForBot(BotEnemy* b);
 };
+
 
 #endif

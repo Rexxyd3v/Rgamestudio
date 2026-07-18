@@ -2,6 +2,8 @@
 #include "../constants.h"
 #include "../ui/ui_widgets.h"
 #include "../ui/ui_theme.h"
+#include "../ui/map_catalog.h"
+#include <cstring>
 
 LobbyScreen::LobbyScreen() :
     startGame(false),
@@ -28,11 +30,11 @@ LobbyScreen::LobbyScreen() :
     background = new MenuBackground(playerSkin, MenuBackground::BackdropStyle::CINEMATIC_BEACH);
     preview = new CharacterPreview();
 
-    shell = { 70.0f, 60.0f, 1160.0f, 560.0f };
-    rosterPanel = { 100.0f, 140.0f, 640.0f, 440.0f };
-    readyBtn = { 800.0f, 260.0f, 360.0f, 58.0f };
-    startBtn = { 800.0f, 335.0f, 360.0f, 58.0f };
-    copyBtn  = { 800.0f, 440.0f, 360.0f, 48.0f };
+    shell = { 50.0f, 70.0f, 1180.0f, 530.0f };
+    rosterPanel = { 80.0f, 150.0f, 640.0f, 420.0f };
+    readyBtn = { 780.0f, 310.0f, 390.0f, 50.0f };
+    startBtn = { 780.0f, 368.0f, 390.0f, 50.0f };
+    copyBtn  = { 780.0f, 462.0f, 390.0f, 42.0f };
 }
 
 LobbyScreen::~LobbyScreen() {
@@ -106,15 +108,46 @@ bool LobbyScreen::Update(float deltaTime) {
         } else if (hCopy && !lanAddress.empty()) {
             SetClipboardText(lanAddress.c_str());
         }
+
+        // Host Map Selection Input
+        if (isHost) {
+            const float gap = 12.0f;
+            float cardW = (390.0f - gap * 2) / 3.0f;
+            float cardH = 72.0f;
+            float mapStartY = 70.0f + 108.0f; // shell.y + 108
+            for (int i = 0; i < 3; ++i) {
+                Rectangle card = { 780.0f + i * (cardW + gap), mapStartY, cardW, cardH };
+                MapId id = static_cast<MapId>(i);
+                const char* path = MapPath(id);
+                bool locked = (path == nullptr || path[0] == '\0');
+                if (!locked && CheckCollisionPointRec(mouse, card) && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+                    NetworkManager::GetInstance().selectedMapId = i;
+                    
+                    // Broadcast PacketMapChanged
+                    PacketMapChanged pkt{};
+                    pkt.header.type = PacketType::MAP_CHANGED;
+                    pkt.header.playerID = NetworkManager::GetInstance().GetLocalPlayerID();
+                    pkt.mapId = i;
+                    NetworkManager::GetInstance().SendPacket(&pkt, sizeof(pkt), true);
+                }
+            }
+        }
     }
 
     auto events = NetworkManager::GetInstance().GetIncomingEvents();
     for (const auto& event : events) {
         if (event.data.size() >= sizeof(PacketType)) {
             PacketType packetType = static_cast<PacketType>(event.data[0]);
-            if (packetType == PacketType::GAME_START) {
+            if (packetType == PacketType::GAME_START && event.data.size() >= sizeof(PacketGameStart)) {
+                PacketGameStart pkt;
+                std::memcpy(&pkt, event.data.data(), sizeof(PacketGameStart));
+                NetworkManager::GetInstance().selectedMapId = pkt.mapId;
                 startGame = true;
                 return false;
+            } else if (packetType == PacketType::MAP_CHANGED && event.data.size() >= sizeof(PacketMapChanged)) {
+                PacketMapChanged pkt;
+                std::memcpy(&pkt, event.data.data(), sizeof(PacketMapChanged));
+                NetworkManager::GetInstance().selectedMapId = pkt.mapId;
             }
         }
     }
@@ -191,21 +224,73 @@ void LobbyScreen::Draw(RenderTexture2D target) {
     Ui::DrawVignette(0.65f);
     Ui::DrawGlassPanel(shell, 0.95f);
 
-    Ui::DrawSectionLabel(menuFont, "LOBBY", { shell.x + 36, shell.y + 22 }, 28.0f);
+    Ui::DrawSectionLabel(menuFont, "LOBBY", { shell.x + 36, shell.y + 18 }, 28.0f);
     const char* role = isHost ? "You are the Host" : "You are a Player";
     DrawTextEx(menuFont, role,
-               { shell.x + 36, shell.y + 56 }, 14.0f, 1.0f,
+               { shell.x + 36, shell.y + 52 }, 13.0f, 1.0f,
                isHost ? UiTheme::AccentGold() : UiTheme::TextMuted());
 
     DrawRoster();
 
     // Right actions
-    Ui::DrawSectionLabel(menuFont, "ROOM", { 800, 150 }, 20.0f);
+    Ui::DrawSectionLabel(menuFont, "ROOM", { 780, shell.y + 18 }, 20.0f);
 
     int readyCount = NetworkManager::GetInstance().GetReadyPlayerCount();
     int totalCount = NetworkManager::GetInstance().GetTotalPlayerCount();
     std::string status = "Ready  " + std::to_string(readyCount) + " / " + std::to_string(totalCount);
-    DrawTextEx(menuFont, status.c_str(), { 800, 185 }, 16.0f, 1.0f, UiTheme::TextMuted());
+    DrawTextEx(menuFont, status.c_str(), { 780, shell.y + 52 }, 14.0f, 1.0f, UiTheme::TextMuted());
+
+    // Map selection drawing
+    Ui::DrawSectionLabel(menuFont, "MAP", { 780, shell.y + 82 }, 14.0f);
+    {
+        auto mapItems = GetMapGalleryItems();
+        const float gap = 12.0f;
+        float cardW = (390.0f - gap * 2) / 3.0f;
+        float cardH = 72.0f;
+        float mapStartY = shell.y + 108.0f;
+        Vector2 mouse = Ui::RemapMouseToVirtual();
+
+        for (int i = 0; i < 3; ++i) {
+            Rectangle card = { 780.0f + i * (cardW + gap), mapStartY, cardW, cardH };
+            bool selected = (NetworkManager::GetInstance().selectedMapId == i);
+            bool locked = (i > 0);
+            bool hovered = isHost && !locked && CheckCollisionPointRec(mouse, card);
+
+            Color bg = selected ? Color{ 40, 36, 28, 230 } : Color{ 22, 24, 32, 200 };
+            if (hovered) bg = Color{ 34, 36, 48, 220 };
+            DrawRectangleRec(card, bg);
+
+            Color border = selected ? UiTheme::AccentGold() : UiTheme::PanelBorder();
+            float borderThick = selected ? 2.5f : 1.0f;
+            DrawRectangleLinesEx(card, borderThick, Fade(border, selected ? 1.0f : 0.4f));
+
+            if (!locked) {
+                if (i < (int)mapItems.size()) {
+                    Texture2D tex = mapItems[i].thumbnail;
+                    if (tex.id != 0) {
+                        float scale = cardW / (float)tex.width;
+                        float w = tex.width * scale;
+                        float h = tex.height * scale;
+                        float y = card.y + (card.height - h) / 2.0f;
+                        DrawTextureEx(tex, { card.x, y }, 0.0f, scale, WHITE);
+                    }
+                }
+                DrawRectangleRec({ card.x, card.y + card.height - 20, card.width, 20 }, Fade(BLACK, 0.6f));
+                const char* mapLabel = (i < (int)mapItems.size()) ? mapItems[i].label : "???";
+                Vector2 labelSize = MeasureTextEx(menuFont, mapLabel, 10.0f, 1.0f);
+                DrawTextEx(menuFont, mapLabel,
+                           { card.x + card.width * 0.5f - labelSize.x * 0.5f, card.y + card.height - 15 },
+                           10.0f, 1.0f, selected ? UiTheme::AccentGold() : UiTheme::TextPrimary());
+            } else {
+                DrawRectangleRec(card, Fade(RED, 0.15f));
+                const char* lockText = "LOCKED";
+                Vector2 labelSize = MeasureTextEx(menuFont, lockText, 10.0f, 1.0f);
+                DrawTextEx(menuFont, lockText, 
+                           { card.x + card.width * 0.5f - labelSize.x * 0.5f, card.y + card.height * 0.5f - 5.0f },
+                           10.0f, 1.0f, UiTheme::TextMuted());
+            }
+        }
+    }
 
     bool localReady = NetworkManager::GetInstance().IsLocalPlayerReady();
     bool canStart = isHost && NetworkManager::GetInstance().AllPlayersReady();
@@ -218,19 +303,19 @@ void LobbyScreen::Draw(RenderTexture2D target) {
         Ui::DrawMenuButton(startBtn, menuFont, "START MATCH  (SPACE)",
                            hoverStart, true, canStart);
 
-        DrawTextEx(menuFont, "SHARE", { 800, 415 }, 12.0f, 1.0f, UiTheme::TextMuted());
+        DrawTextEx(menuFont, "SHARE", { 780, startBtn.y + 60 }, 12.0f, 1.0f, UiTheme::TextMuted());
         Ui::DrawMenuButton(copyBtn, menuFont, "COPY LAN ADDRESS  (C)",
                            hoverCopy, false, !lanAddress.empty());
 
         if (!lanAddress.empty()) {
             DrawTextEx(menuFont, lanAddress.c_str(),
-                       { 800, 500 }, 12.0f, 1.0f, UiTheme::SkyAccent());
+                       { 780, copyBtn.y + copyBtn.height + 6 }, 12.0f, 1.0f, UiTheme::SkyAccent());
         }
         DrawTextEx(menuFont, "Or share your playit.gg tunnel",
-                   { 800, 522 }, 11.0f, 1.0f, UiTheme::TextMuted());
+                   { 780, copyBtn.y + copyBtn.height + 24 }, 11.0f, 1.0f, UiTheme::TextMuted());
     } else {
         DrawTextEx(menuFont, localReady ? "Waiting for host to start..." : "Press Ready when you're set",
-                   { 800, 340 }, 14.0f, 1.0f, UiTheme::TextMuted());
+                   { 780, readyBtn.y + 60 }, 14.0f, 1.0f, UiTheme::TextMuted());
     }
 
     // Back button like in OnlineMenu (top-left)

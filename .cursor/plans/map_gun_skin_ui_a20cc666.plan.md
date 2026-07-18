@@ -4,7 +4,7 @@ overview: Add reusable selection-card UI templates for map pick (host, lobby) an
 todos:
   - id: select-template
     content: Add SelectGallery + map/weapon skin catalogs and preview wrappers
-    status: in_progress
+    status: completed
   - id: online-gun-ui
     content: Add gun skin stage+gallery to online_menu; store localWeaponSkin
     status: pending

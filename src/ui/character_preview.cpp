@@ -79,12 +79,16 @@ void CharacterPreview::DrawStage(Rectangle stageBounds, int selectedSkin) {
     DrawRectangleLinesEx(stageBox, 1.5f, Fade(UiTheme::AccentGold(), 0.35f));
 
     if (idle[idx]) {
+        // Dynamically scale character based on stage height, capped at original scale
+        float baseScale = 0.16f;
+        float scale = baseScale * 2.0f * (stageBox.height / 292.0f);
+        if (scale > baseScale * 2.0f) scale = baseScale * 2.0f;
+
         Vector2 pos = {
             stageBox.x + stageBox.width * 0.5f,
             stageBox.y + stageBox.height * 0.12f
         };
-        float baseScale = 0.16f;
-        idle[idx]->Draw(pos, 1, baseScale * 2.0f, 0.0f);
+        idle[idx]->Draw(pos, 1, scale, 0.0f);
     }
 }
 

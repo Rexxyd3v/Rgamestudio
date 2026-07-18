@@ -6,7 +6,7 @@
 class Player : public Character {
 public:
     // playerIndex: 0 = WASD + mouse,  1 = Arrow keys + auto-aim
-    Player(Vector2 startPosition, int playerIndex = 0, const std::string& skinPath = "");
+    Player(Vector2 startPosition, int playerIndex = 0, const std::string& skinPath = "", int weaponSkin = 0);
     ~Player() override;
 
     void Update(float deltaTime) override;
