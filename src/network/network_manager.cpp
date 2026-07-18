@@ -664,72 +664,78 @@ void NetworkManager::Update() {
                             }
                         }
                     } else if (packetType == PacketType::VOICE_DATA) {
-                        // Voice data packets are processed directly by the voice chat system
-                        if (netEvent.data.size() >= sizeof(PacketVoiceData)) {
-                            // Extract the voice packet data
+                        // Voice data packets are variable-length: header + seq + frameSize + only
+                        // the actually-encoded audio bytes (NOT the full MAX_OPUS_FRAME_SIZE buffer).
+                        // Validate against the real minimum header size first, then confirm the
+                        // declared frameSize actually fits within what we received.
+                        constexpr size_t kVoiceHeaderSize =
+                            sizeof(PacketHeader) + sizeof(uint16_t) + sizeof(uint16_t);
+                        if (netEvent.data.size() >= kVoiceHeaderSize) {
                             const PacketVoiceData* voicePacket =
                                 reinterpret_cast<const PacketVoiceData*>(netEvent.data.data());
 
-                            uint32_t speakerID = voicePacket->header.playerID;
+                            if (netEvent.data.size() >= kVoiceHeaderSize + voicePacket->frameSize) {
+                                uint32_t speakerID = voicePacket->header.playerID;
 
-                            // Echo prevention: don't play back our own voice reflected from host
-                            if (speakerID != localPlayerID) {
-                                // If host, rebroadcast this voice packet to all other connected clients
-                                if (isHost) {
-                                    for (size_t i = 0; i < host->peerCount; ++i) {
-                                        ENetPeer* peer = &host->peers[i];
-                                        if (peer == event.peer) continue;
-                                        if (peer->state != ENET_PEER_STATE_CONNECTED) continue;
-                                        ENetPacket* p = enet_packet_create(
-                                            netEvent.data.data(), netEvent.data.size(), 0);
-                                        enet_peer_send(peer, 0, p);
+                                // Echo prevention: don't play back our own voice reflected from host
+                                if (speakerID != localPlayerID) {
+                                    // If host, rebroadcast this voice packet to all other connected clients
+                                    if (isHost) {
+                                        for (size_t i = 0; i < host->peerCount; ++i) {
+                                            ENetPeer* peer = &host->peers[i];
+                                            if (peer == event.peer) continue;
+                                            if (peer->state != ENET_PEER_STATE_CONNECTED) continue;
+                                            ENetPacket* p = enet_packet_create(
+                                                netEvent.data.data(), netEvent.data.size(), 0);
+                                            enet_peer_send(peer, 0, p);
+                                        }
                                     }
-                                }
 
-                                // Check proximity before processing voice locally
-                                bool shouldProcess = false;
+                                    // Check proximity before processing voice locally
+                                    bool shouldProcess = false;
 
-                                // Get speaker position from our tracking
-                                auto senderPosIt = playerPositions.find(speakerID);
-                                Vector2 senderPos = {0.0f, 0.0f};
-                                bool senderPosValid = false;
-                                if (senderPosIt != playerPositions.end()) {
-                                    senderPos = senderPosIt->second;
-                                    senderPosValid = true;
-                                }
+                                    // Get speaker position from our tracking
+                                    auto senderPosIt = playerPositions.find(speakerID);
+                                    Vector2 senderPos = {0.0f, 0.0f};
+                                    bool senderPosValid = false;
+                                    if (senderPosIt != playerPositions.end()) {
+                                        senderPos = senderPosIt->second;
+                                        senderPosValid = true;
+                                    }
 
-                                // Get local player position from gameplay screen
-                                Vector2 localPos = {0.0f, 0.0f};
-                                bool localPosValid = false;
+                                    // Get local player position from gameplay screen
+                                    Vector2 localPos = {0.0f, 0.0f};
+                                    bool localPosValid = false;
 
-                                // Try to get local player position from gameplay screen
-                                extern bool (*getLocalPlayerPosCallback)(Vector2& outPos);
-                                if (getLocalPlayerPosCallback && getLocalPlayerPosCallback(localPos)) {
-                                    localPosValid = true;
-                                }
+                                    // Try to get local player position from gameplay screen
+                                    extern bool (*getLocalPlayerPosCallback)(Vector2& outPos);
+                                    if (getLocalPlayerPosCallback && getLocalPlayerPosCallback(localPos)) {
+                                        localPosValid = true;
+                                    }
 
-                                // If we have both positions, check distance
-                                if (localPosValid && senderPosValid) {
-                                    float dx = senderPos.x - localPos.x;
-                                    float dy = senderPos.y - localPos.y;
-                                    float distanceSq = dx*dx + dy*dy;
-                                    float hearingDistanceSq = 800.0f * 800.0f; // 800 units hearing range
+                                    // If we have both positions, check distance
+                                    if (localPosValid && senderPosValid) {
+                                        float dx = senderPos.x - localPos.x;
+                                        float dy = senderPos.y - localPos.y;
+                                        float distanceSq = dx*dx + dy*dy;
+                                        float hearingDistanceSq = 800.0f * 800.0f; // 800 units hearing range
 
-                                    if (distanceSq <= hearingDistanceSq) {
+                                        if (distanceSq <= hearingDistanceSq) {
+                                            shouldProcess = true;
+                                        }
+                                    }
+                                    // If we can't get positions for some reason, process the packet anyway
+                                    else {
                                         shouldProcess = true;
                                     }
-                                }
-                                // If we can't get positions for some reason, process the packet anyway
-                                else {
-                                    shouldProcess = true;
-                                }
 
-                                // Forward to proximity voice chat system for processing if within range
-                                if (shouldProcess) {
-                                    extern ProximityVoiceChat proximityVoiceChat;
-                                    extern bool proximityVoiceInitialized;
-                                    if (proximityVoiceInitialized) {
-                                        proximityVoiceChat.processVoicePacket(voicePacket, speakerID);
+                                    // Forward to proximity voice chat system for processing if within range
+                                    if (shouldProcess) {
+                                        extern ProximityVoiceChat proximityVoiceChat;
+                                        extern bool proximityVoiceInitialized;
+                                        if (proximityVoiceInitialized) {
+                                            proximityVoiceChat.processVoicePacket(voicePacket, speakerID);
+                                        }
                                     }
                                 }
                             }

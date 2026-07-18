@@ -73,6 +73,7 @@ public:
 
     std::string localUsername;
     int localSkinIndex;
+    // TODO: Should be per-slot array instead of single value to support per-weapon skin selection.
     int localWeaponSkin;
     int localKills;
     int localDeaths;

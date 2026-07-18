@@ -7,6 +7,7 @@
 #include "screens/main_level.h"
 #include "screens/main_menu.h"
 #include "screens/online_menu.h"
+#include "screens/offline_menu.h"
 #include "screens/lobby_screen.h"
 #include "network/network_manager.h"
 #include "utils/texture_manager.h"
@@ -45,6 +46,7 @@ int main() {
     bool isFirstScreenActive = true;
     bool isMainMenuActive = false;
     bool isOnlineMenuActive = false;
+    bool isOfflineMenuActive = false;
     bool isLobbyActive = false;
 
     while (!WindowShouldClose()) {
@@ -77,9 +79,23 @@ int main() {
                         currentScreen = new OnlineMenuScreen();
                         isOnlineMenuActive = true;
                     } else {
-                        currentScreen = new GameplayScreen(mode);
+                        currentScreen = new OfflineMenuScreen();
+                        isOfflineMenuActive = true;
                     }
                     isMainMenuActive = false;
+                } else if (isOfflineMenuActive) {
+                    OfflineMenuScreen* menu = static_cast<OfflineMenuScreen*>(currentScreen);
+                    if (menu->ShouldStartGame()) {
+                        delete currentScreen;
+                        currentScreen = new GameplayScreen(GameMode::OFFLINE);
+                        isOfflineMenuActive = false;
+                    } else {
+                        // User backed out to main menu
+                        delete currentScreen;
+                        currentScreen = new MainMenuScreen();
+                        isOfflineMenuActive = false;
+                        isMainMenuActive = true;
+                    }
                 } else if (isOnlineMenuActive) {
                     OnlineMenuScreen* menu = static_cast<OnlineMenuScreen*>(currentScreen);
                     if (menu->ShouldStartGame()) {

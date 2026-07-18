@@ -97,30 +97,23 @@ Character::Character(Vector2 startPosition, const std::string& assetPath, float 
     // - slot 2 (Pistol) uses weaponR3.png
     weaponTextures.clear();
 
-    auto loadSlotTexture = [&](int slot, int skinId) -> Texture2D {
-        std::string skinPrefix = WeaponSkinPath(static_cast<WeaponSkinId>(skinId));
-        if (skinPrefix.empty()) {
-            skinPrefix = "assets/WeaponSkins/Default/";
-        }
-        // keep existing path scheme in this codebase:
-        // - slot 0 expects weaponR1.png
-        // - slot 1 expects weaponR2.png
-        // - slot 2 expects weaponR3.png
+    auto loadSlot = [&](int slot, int skinId) -> Texture2D {
+        std::string slotPath = GetWeaponSlotSkinPath(slot, skinId);
         std::string png = "weaponR" + std::to_string(slot + 1) + ".png";
-        return TextureManager::GetTexture(skinPrefix + png);
+        return TextureManager::GetTexture(slotPath + png);
     };
 
     // Try selected skin first; if that specific slot texture is missing, fallback to default skin only for that slot.
-    Texture2D t0 = loadSlotTexture(0, weaponSkinId);
-    if (t0.id == 0) t0 = loadSlotTexture(0, 0);
+    Texture2D t0 = loadSlot(0, weaponSkinId);
+    if (t0.id == 0) t0 = loadSlot(0, 0);
     weaponTextures.push_back(t0);
 
-    Texture2D t1 = loadSlotTexture(1, weaponSkinId);
-    if (t1.id == 0) t1 = loadSlotTexture(1, 0);
+    Texture2D t1 = loadSlot(1, weaponSkinId);
+    if (t1.id == 0) t1 = loadSlot(1, 0);
     weaponTextures.push_back(t1);
 
-    Texture2D t2 = loadSlotTexture(2, weaponSkinId);
-    if (t2.id == 0) t2 = loadSlotTexture(2, 0);
+    Texture2D t2 = loadSlot(2, weaponSkinId);
+    if (t2.id == 0) t2 = loadSlot(2, 0);
     weaponTextures.push_back(t2);
 }
 
@@ -288,11 +281,18 @@ void Character::ShootInDirection(Vector2 dir) {
 
 void Character::Draw() {
     float draw_y = position.y - jumpHeight;
-    animations[currentState]->Draw({ position.x, draw_y }, faceDirection, scale);
+    float alpha = GetDrawAlpha();
+    Color tint = WHITE;
+    tint.a = (unsigned char)(255.0f * alpha);
+    animations[currentState]->Draw({ position.x, draw_y }, faceDirection, scale, 0.0f, tint);
     if (shieldTimer > 0.0f) {
         // Draw a glowing shield bubble centered on the character
-        DrawCircleLines((int)position.x, (int)draw_y + 30, 42.0f, SKYBLUE);
-        DrawCircleLines((int)position.x, (int)draw_y + 30, 44.0f, BLUE);
+        Color shieldBlue = SKYBLUE;
+        shieldBlue.a = (unsigned char)(SKYBLUE.a * alpha);
+        Color shieldDarkBlue = BLUE;
+        shieldDarkBlue.a = (unsigned char)(BLUE.a * alpha);
+        DrawCircleLines((int)position.x, (int)draw_y + 30, 42.0f, shieldBlue);
+        DrawCircleLines((int)position.x, (int)draw_y + 30, 44.0f, shieldDarkBlue);
     }
     // Update muzzle flash timer
     // (we tick it here since Draw is called every frame and avoids adding an Update call to the base class)
@@ -344,8 +344,9 @@ void Character::Draw() {
                                   (float)currentTex.width  * weaponScale,
                                   (float)currentTex.height * weaponScale };
             Vector2 origin = { pivotX, pivotY };
-            DrawTexturePro(currentTex, srcRec, dstRec, origin, rotation,
-                           GetWeaponSlotSkinTint(currentWeaponIndex, weaponSkinId));
+            Color weaponTint = GetWeaponSlotSkinTint(currentWeaponIndex, weaponSkinId);
+            weaponTint.a = (unsigned char)(weaponTint.a * alpha);
+            DrawTexturePro(currentTex, srcRec, dstRec, origin, rotation, weaponTint);
 
             if (muzzleFlashTimer > 0.0f) {
                 Texture2D muzzleTex = TextureManager::GetTexture(
@@ -366,7 +367,9 @@ void Character::Draw() {
                                        (float)muzzleTex.height * muzzleScale };
                     Vector2 mOrigin = { (float)muzzleTex.width * muzzleScale / 2.0f,
                                         (float)muzzleTex.height * muzzleScale / 2.0f };
-                    DrawTexturePro(muzzleTex, mSrc, mDst, mOrigin, rotation, WHITE);
+                    Color muzzleTint = WHITE;
+                    muzzleTint.a = (unsigned char)(255.0f * alpha);
+                    DrawTexturePro(muzzleTex, mSrc, mDst, mOrigin, rotation, muzzleTint);
                 }
             }
         }
@@ -380,7 +383,8 @@ void Character::Draw() {
 
 void Character::DrawUI() {
     float draw_y = position.y - jumpHeight;
-    
+    float alpha = GetDrawAlpha();
+
     // Overhead hit indicator health bar (with container border)
     {
         const float barWidth = 60.0f;
@@ -397,15 +401,18 @@ void Character::DrawUI() {
         float barY = (draw_y - nameYOffset) + pillHeight + (30.0f * scale);
         Vector2 barPos = { position.x - barWidth / 2.0f, barY };
         // Background
-        DrawRectangle((int)barPos.x, (int)barPos.y, (int)barWidth, (int)barHeight, {60, 60, 60, 200});
+        Color bg = {60, 60, 60, (unsigned char)(200.0f * alpha)};
+        DrawRectangle((int)barPos.x, (int)barPos.y, (int)barWidth, (int)barHeight, bg);
         // Health fill (smoothed)
         float healthFill = barWidth * (healthDisplay / 100.0f);
         if (healthFill > 0.0f) {
             Color healthColor = isMonster ? RED : GREEN;
+            healthColor.a = (unsigned char)(healthColor.a * alpha);
             DrawRectangle((int)barPos.x, (int)barPos.y, (int)healthFill, (int)barHeight, healthColor);
         }
         // Outline
-        DrawRectangleLines((int)barPos.x, (int)barPos.y, (int)barWidth, (int)barHeight, {200, 200, 200, 230});
+        Color outline = {200, 200, 200, (unsigned char)(230.0f * alpha)};
+        DrawRectangleLines((int)barPos.x, (int)barPos.y, (int)barWidth, (int)barHeight, outline);
     }
 
     // ---- Player name (IGN) floating above the head ----
@@ -421,11 +428,13 @@ void Character::DrawUI() {
         float nameY = draw_y - nameYOffset;
         float nameX = position.x - textWidth / 2.0f;
         // Background pill for readability against any ground
+        Color bg = {0, 0, 0, (unsigned char)(160.0f * alpha)};
         DrawRectangle((int)nameX - namePadding, (int)nameY - namePadding,
                       textWidth + namePadding * 2, textHeight + namePadding * 2,
-                      { 0, 0, 0, 160 });
+                      bg);
         // Name text color: monsters in red, regular characters in white
         Color nameColor = isMonster ? Color{ 255, 100, 100, 255 } : RAYWHITE;
+        nameColor.a = (unsigned char)(nameColor.a * alpha);
         DrawText(name.c_str(), (int)nameX, (int)nameY, nameFontSize, nameColor);
     }
 }

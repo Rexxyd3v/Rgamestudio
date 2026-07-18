@@ -303,29 +303,46 @@ void MenuBackground::TickWorld(float deltaTime) {
 
         // Respawn dead bots quickly (2s) so the spectator always sees action
         if (b->ShouldRespawn()) {
-            // Respawn near an existing living bot for immediate combat
+            // Respawn near an existing living bot for immediate combat, but try to avoid spawning too close to the camera
             Vector2 spawn = {
                 (float)GetRandomValue(200, (int)WORLD_WIDTH  - 200),
                 (float)GetRandomValue(200, (int)WORLD_HEIGHT - 200)
             };
+            bool foundGoodSpawn = false;
             for (auto other : bots) {
                 if (!other->IsDead() && other != b) {
-                    // Spawn within 400 units of a live opponent
-                    float angle = (float)GetRandomValue(0, 628) / 100.0f;
-                    spawn = {
-                        other->GetPosition().x + cosf(angle) * 350.0f,
-                        other->GetPosition().y + sinf(angle) * 350.0f
-                    };
-                    // Clamp to world bounds
-                    spawn.x = fclamp(spawn.x, 150.0f, WORLD_WIDTH  - 150.0f);
-                    spawn.y = fclamp(spawn.y, 150.0f, WORLD_HEIGHT - 150.0f);
-                    break;
+                    // Try up to 5 times to find a spawn point near this bot that is far from camera
+                    for (int attempt = 0; attempt < 5; attempt++) {
+                        float angle = (float)GetRandomValue(0, 628) / 100.0f;
+                        Vector2 candidate = {
+                            other->GetPosition().x + cosf(angle) * 350.0f,
+                            other->GetPosition().y + sinf(angle) * 350.0f
+                        };
+                        candidate.x = fclamp(candidate.x, 150.0f, WORLD_WIDTH  - 150.0f);
+                        candidate.y = fclamp(candidate.y, 150.0f, WORLD_HEIGHT - 150.0f);
+                        // Check distance to camera target (at least 400 units away)
+                        float dx = candidate.x - camera.target.x;
+                        float dy = candidate.y - camera.target.y;
+                        float distSq = dx*dx + dy*dy;
+                        if (distSq >= 400.0f * 400.0f) {
+                            spawn = candidate;
+                            foundGoodSpawn = true;
+                            break; // break out of attempt loop
+                        }
+                    }
+                    if (foundGoodSpawn) {
+                        break; // break out of other loop
+                    }
+                    // If we didn't find a good spot for this bot, try the next bot
                 }
             }
+            // If we found a good spawn, we use it; otherwise, we keep the initial random spawn.
             b->ResetHealth(100.0f);
             b->GetProjectiles().clear();
             b->SetPosition(spawn);
             b->ResetDeathTimer();
+            // Start fade-in effect for respawning bots in demo mode
+            b->SetSpawnFadeTimer(0.4f);
         }
     }
 

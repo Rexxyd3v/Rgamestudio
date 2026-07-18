@@ -26,6 +26,7 @@ BotEnemy::BotEnemy(Vector2 startPosition, const std::string& assetPath)
     this->health = 100.0f;
     this->currentWeaponIndex = GetRandomValue(0, 2); // Random weapon for variety
     this->targetPosition = startPosition;
+    this->respawnDelay = (float)GetRandomValue(25, 40) / 10.0f; // 2.5-4.0s
 }
 
 BotEnemy::~BotEnemy() {
@@ -53,23 +54,31 @@ void BotEnemy::Update(float deltaTime) {
     } else {
         deathTimer = 0.0f;
     }
-    
+
     UpdateSkills(deltaTime);
     UpdatePhysics(deltaTime);
-    
+
     // Update cooldowns
     if (currentShootCooldown > 0.0f) {
         currentShootCooldown -= deltaTime;
     }
-    
+
     // Update active projectiles
     for (auto& p : projectiles) {
         p->Update(deltaTime);
     }
-    
+
     // Update current animation
     if (animations.count(currentState)) {
         animations[currentState]->Update(deltaTime);
+    }
+
+    // Update fade-in timer for demo mode
+    if (spawnFadeTimer > 0.0f) {
+        spawnFadeTimer -= deltaTime;
+        if (spawnFadeTimer < 0.0f) {
+            spawnFadeTimer = 0.0f;
+        }
     }
 }
 
@@ -285,10 +294,22 @@ void BotEnemy::UpdateAI(float deltaTime, Vector2 playerPosition) {
 }
 
 bool BotEnemy::ShouldRespawn() const {
-    return IsDead() && deathTimer >= 3.0f;
+    return IsDead() && deathTimer >= respawnDelay;
 }
 
 void BotEnemy::ResetDeathTimer() {
     deathTimer = 0.0f;
     isMoving = false;
+    this->respawnDelay = (float)GetRandomValue(25, 40) / 10.0f; // 2.5-4.0s
+}
+
+
+float BotEnemy::GetDrawAlpha() const {
+    // Only apply fade-in effect in demo mode (menu background)
+    if (demoMode && spawnFadeTimer > 0.0f) {
+        // Fade in over 0.4 seconds
+        const float fadeDuration = 0.4f;
+        return spawnFadeTimer / fadeDuration; // 0.0 to 1.0
+    }
+    return 1.0f;
 }

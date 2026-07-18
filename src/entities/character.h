@@ -109,6 +109,9 @@ public:
         };
     }
 
+    // Alpha multiplier for drawing (0.0f to 1.0f). Override in subclasses for effects like fade-in.
+    virtual float GetDrawAlpha() const { return 1.0f; }
+
     // Vertical offset from the sprite center to the feet. Slightly positive
     // so the depth key matches the bottom of the silhouette, which is what
     // RPG Maker-style engines use to decide overlap.
