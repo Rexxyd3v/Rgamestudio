@@ -38,7 +38,6 @@ void Animation::Draw(Vector2 position, int faceDirection, float scale, float rot
     
     Texture2D tex = frames[currentFrame];
     Rectangle sourceRec = { 0.0f, 0.0f, (float)tex.width * faceDirection, (float)tex.height };
-    // Position represents the center of the character base
     Rectangle destRec = { position.x, position.y, (float)tex.width * scale, (float)tex.height * scale };
     Vector2 origin = { (float)tex.width * scale / 2.0f, (float)tex.height * scale / 2.0f };
     
@@ -53,14 +52,4 @@ void Animation::Reset() {
 
 bool Animation::IsFinished() const {
     return finished;
-}
-
-int Animation::FrameWidth() const {
-    if (frames.empty()) return 0;
-    return frames[0].width;
-}
-
-int Animation::FrameHeight() const {
-    if (frames.empty()) return 0;
-    return frames[0].height;
 }

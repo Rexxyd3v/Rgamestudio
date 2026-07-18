@@ -9,6 +9,11 @@
 #include <ctime>
 #include <algorithm>
 #include <cctype>
+#include "../voice/voice_chat.h"
+
+// Extern declarations for voice chat
+extern VoiceChat voiceChat;
+extern bool voiceInitialized;
 
 
 
@@ -645,6 +650,21 @@ void NetworkManager::Update() {
                                     netEvent.data.data(), netEvent.data.size(),
                                     ENET_PACKET_FLAG_RELIABLE);
                                 enet_peer_send(peer, 0, p);
+                            }
+                        }
+                    } else if (packetType == PacketType::VOICE_DATA) {
+                        // Voice data packets are not added to incomingEvents for game logic
+                        // They are processed directly by the voice chat system
+                        if (netEvent.data.size() >= sizeof(PacketVoiceData)) {
+                            // Forward to voice chat system for processing
+                            // Access the global voice chat instance from main.cpp
+                            extern VoiceChat voiceChat;
+                            extern bool voiceInitialized;
+                            if (voiceInitialized) {
+                                // Extract the voice packet data
+                                const PacketVoiceData* voicePacket =
+                                    reinterpret_cast<const PacketVoiceData*>(netEvent.data.data());
+                                voiceChat.processVoicePacket(voicePacket, netEvent.senderID);
                             }
                         }
                     }

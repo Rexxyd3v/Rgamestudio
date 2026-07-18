@@ -19,7 +19,8 @@ enum class PacketType : uint8_t {
     PLAYER_KILLED,      // Event: player was killed by another (updates score)
     PLAYER_RESPAWN,     // Event: player respawned
     GAME_START,         // Host signals game should start
-    MAP_CHANGED         // Host signals selected map changed
+    MAP_CHANGED,        // Host signals selected map changed
+    VOICE_DATA          // Voice audio data (Opus encoded)
 };
 
 // Base header for all packets
@@ -101,6 +102,15 @@ struct PacketGameStart {
 struct PacketMapChanged {
     PacketHeader header;
     int mapId; // MapId enum value
+};
+
+// Voice data packet (Opus encoded audio)
+#define MAX_OPUS_FRAME_SIZE 1200 // Maximum size of an Opus frame in bytes
+struct PacketVoiceData {
+    PacketHeader header;
+    uint16_t sequenceNumber; // For detecting packet loss/reordering
+    uint16_t frameSize;      // Size of the Opus frame in bytes
+    uint8_t  opusData[MAX_OPUS_FRAME_SIZE]; // The encoded audio data
 };
 #pragma pack(pop)
 

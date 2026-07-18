@@ -8,11 +8,6 @@
 #include <functional>
 #include <climits>
 
-// --- Inline Rock / Tree member functions ------------------------------------
-// Local copies of the structs from main_level.h. They intentionally have
-// no cross-TU dependencies (only raylib + texture pointers) so this file
-// can compile without dragging in the entire GameplayScreen.
-
 static inline float fclamp(float val, float lo, float hi) {
     return val < lo ? lo : (val > hi ? hi : val);
 }
@@ -99,20 +94,22 @@ static inline void ResolveCollisionPush(Character* c, Rectangle cb, Rectangle ob
 MenuBackground::MenuBackground(int localSkinIndex, BackdropStyle style) {
     worldTime = 0.0f;
 
+    // Broadcast camera initial state
     fightFocus     = { WORLD_WIDTH / 2.0f, WORLD_HEIGHT / 2.0f };
     broadcastTimer = 0.0f;
-    cameraZoom     = 1.05f;
-    cameraZoomTarget = 1.05f;
+    cameraZoom     = 1.0f;
+    cameraZoomTarget = 1.0f;
     cameraZoomTimer  = 0.0f;
-    driftPhase     = 0.0f;
-    cinematicBase  = { WORLD_WIDTH * 0.42f, WORLD_HEIGHT * 0.48f };
 
-    useCinematic = (style != BackdropStyle::LIVE_GAMEPLAY);
+    // Enable professional demo-mode AI for all bots (menu-only, reverted in destructor)
+    BotEnemy::SetDemoMode(true);
 
-    if (!useCinematic) {
-        BotEnemy::SetDemoMode(true);
-    }
+    // Parallax option not present in this build; keep disabled.
+    (void)style;
+    useParallaxBackdrop = false;
 
+
+    // Off-screen render targets
     sceneRT = LoadRenderTexture(VIRTUAL_WIDTH, VIRTUAL_HEIGHT);
     SetTextureFilter(sceneRT.texture, TEXTURE_FILTER_BILINEAR);
 
@@ -122,23 +119,19 @@ MenuBackground::MenuBackground(int localSkinIndex, BackdropStyle style) {
     blurRT2 = LoadRenderTexture(VIRTUAL_WIDTH / 8, VIRTUAL_HEIGHT / 8);
     SetTextureFilter(blurRT2.texture, TEXTURE_FILTER_BILINEAR);
 
-    camera.target   = cinematicBase;
+    // Camera starts at world center
+    camera.target   = { WORLD_WIDTH / 2.0f, WORLD_HEIGHT / 2.0f };
     camera.offset   = { VIRTUAL_WIDTH / 2.0f, VIRTUAL_HEIGHT / 2.0f };
     camera.rotation = 0.0f;
-    camera.zoom     = cameraZoom;
+    camera.zoom     = 1.0f;
 
     InitWorld();
-    if (!useCinematic) {
-        InitEntities(localSkinIndex);
-    } else {
-        (void)localSkinIndex;
-    }
+    InitEntities(localSkinIndex);
 }
 
 MenuBackground::~MenuBackground() {
-    if (!useCinematic) {
-        BotEnemy::SetDemoMode(false);
-    }
+    // Restore normal gameplay AI before we go
+    BotEnemy::SetDemoMode(false);
     for (auto b : bots) delete b;
     UnloadRenderTexture(sceneRT);
     UnloadRenderTexture(blurRT1);
@@ -442,31 +435,11 @@ void MenuBackground::TickWorld(float deltaTime) {
     camera.zoom = cameraZoom;
 }
 
-void MenuBackground::TickCinematicCamera(float deltaTime) {
-    driftPhase += deltaTime * 0.22f;
-    float dx = sinf(driftPhase) * 55.0f;
-    float dy = cosf(driftPhase * 0.7f) * 28.0f;
-    Vector2 desired = { cinematicBase.x + dx, cinematicBase.y + dy };
-    camera.target.x += (desired.x - camera.target.x) * 1.2f * deltaTime;
-    camera.target.y += (desired.y - camera.target.y) * 1.2f * deltaTime;
-
-    cameraZoomTarget = 1.02f + 0.04f * (0.5f + 0.5f * sinf(driftPhase * 0.5f));
-    cameraZoom += (cameraZoomTarget - cameraZoom) * 0.6f * deltaTime;
-    camera.zoom = cameraZoom;
-
-    float halfVW = VIRTUAL_WIDTH  / (2.0f * camera.zoom);
-    float halfVH = VIRTUAL_HEIGHT / (2.0f * camera.zoom);
-    camera.target.x = fclamp(camera.target.x, halfVW, (float)WORLD_WIDTH  - halfVW);
-    camera.target.y = fclamp(camera.target.y, halfVH, (float)WORLD_HEIGHT - halfVH);
-}
-
 void MenuBackground::Update(float deltaTime, float fadeInAlpha) {
-    (void)fadeInAlpha;
+    (void)fadeInAlpha; // reserved for future hooks
     worldTime += deltaTime;
 
-    if (useCinematic) {
-        TickCinematicCamera(deltaTime);
-    } else {
+    if (!useParallaxBackdrop) {
         TickWorld(deltaTime);
     }
 }
@@ -475,70 +448,97 @@ void MenuBackground::Update(float deltaTime, float fadeInAlpha) {
 void MenuBackground::DrawScene() {
     BeginTextureMode(sceneRT);
 
-    if (useCinematic) {
-        // Warm coastal sky (sand / amber — no purple)
-        for (int strip = 0; strip < WORLD_HEIGHT; strip += 60) {
+    if (useParallaxBackdrop) {
+        // --- Menu backdrop: dusk gradient + slow parallax tile scrolling ---
+        for (int strip = 0; strip < WORLD_HEIGHT; strip += 80) {
             float t = (float)strip / (float)WORLD_HEIGHT;
-            unsigned char r = (unsigned char)(28 + t * 55);
-            unsigned char g = (unsigned char)(22 + t * 35);
-            unsigned char b = (unsigned char)(38 + t * 25);
-            DrawRectangle(0, strip, WORLD_WIDTH, 60, { r, g, b, 255 });
+            unsigned char r = (unsigned char)(25 + t * 25);      // deeper pink
+            unsigned char g = (unsigned char)(10 + t * 12);
+            unsigned char b = (unsigned char)(45 + t * 35);
+            DrawRectangle(0, strip, WORLD_WIDTH, 80, { r, g, b, 255 });
         }
 
-        float sunX = WORLD_WIDTH * 0.72f + sinf(worldTime * 0.08f) * 40.0f;
-        float sunY = WORLD_HEIGHT * 0.22f;
-        DrawCircle((int)sunX, (int)sunY, 260, { 255, 190, 110, 28 });
-        DrawCircle((int)sunX, (int)sunY, 140, { 255, 220, 150, 22 });
+        // soft sun glow (screen-space inside worldRT)
+        float sunX = WORLD_WIDTH * 0.65f + sinf(worldTime * 0.10f) * 80.0f;
+        float sunY = WORLD_HEIGHT * 0.25f;
+        DrawCircle((int)sunX, (int)sunY, 220, { 255, 180, 80, 35 });
+        DrawCircle((int)sunX, (int)sunY, 160, { 255, 210, 120, 25 });
 
+        // Camera drift (no follow needed)
+        camera.target = { WORLD_WIDTH / 2.0f, WORLD_HEIGHT / 2.0f };
+        camera.offset = { VIRTUAL_WIDTH / 2.0f, VIRTUAL_HEIGHT / 2.0f };
         BeginMode2D(camera);
 
         if (bgTex.id != 0 && bgTex.width > 0) {
-            int cols = (int)(WORLD_WIDTH  / bgTex.width)  + 2;
-            int rows = (int)(WORLD_HEIGHT / bgTex.height) + 2;
-            Color beachTint = { 255, 235, 210, 255 };
+            // layer speeds
+            float offFar  = worldTime * 12.0f;
+            float offNear = worldTime * 28.0f;
+
+            int tileW = bgTex.width;
+            int tileH = bgTex.height;
+
+            // Far layer tint
+            Color farTint = { 180, 120, 200, 160 };
+            int cols = (int)(WORLD_WIDTH / tileW) + 3;
+            int rows = (int)(WORLD_HEIGHT / tileH) + 3;
             for (int y = 0; y < rows; ++y) {
                 for (int x = 0; x < cols; ++x) {
-                    DrawTexture(bgTex, x * bgTex.width, y * bgTex.height, beachTint);
+                    float dx = x * tileW + fmodf(offFar, (float)tileW);
+                    DrawTexture(bgTex, (int)dx, y * tileH, farTint);
+                }
+            }
+
+            // Near layer (slightly higher contrast)
+            Color nearTint = { 255, 190, 120, 190 };
+            for (int y = 0; y < rows; ++y) {
+                for (int x = 0; x < cols; ++x) {
+                    float dx = x * tileW + fmodf(offNear, (float)tileW);
+                    DrawTexture(bgTex, (int)dx, y * tileH, nearTint);
                 }
             }
         }
 
+        // Draw some silhouette rocks/trees WITHOUT depth sorting complexity
+        // (blur post-process makes it look good even if not perfect).
         for (const auto& r : rocks) {
-            Color tint = r.tint;
-            tint.a = 220;
+            // darker silhouettes
             DrawTexturePro(
                 *r.tex,
                 { 0, 0, (float)r.tex->width, (float)r.tex->height },
                 { r.position.x, r.position.y, r.tex->width * r.scale, r.tex->height * r.scale },
                 { (r.tex->width * r.scale) / 2.0f, (r.tex->height * r.scale) / 2.0f },
-                r.rotation, tint);
-            // Soft silhouette underlay
-            DrawTexturePro(
-                *r.tex,
-                { 0, 0, (float)r.tex->width, (float)r.tex->height },
-                { r.position.x, r.position.y, r.tex->width * r.scale, r.tex->height * r.scale },
-                { (r.tex->width * r.scale) / 2.0f, (r.tex->height * r.scale) / 2.0f },
-                r.rotation, { 0, 0, 0, 35 });
+                r.rotation, { 0, 0, 0, 70 }
+            );
         }
         for (const auto& t : trees) {
-            t.Draw();
+            float w = t.texW * t.scale;
+            float h = t.texH * t.scale;
+            Vector2 orig = { w / 2.0f, h / 2.0f };
+            DrawTexturePro(
+                *t.tex,
+                { 0, 0, (float)t.tex->width, (float)t.tex->height },
+                { t.position.x, t.position.y, w, h },
+                orig,
+                0.0f,
+                { 0, 0, 0, 55 }
+            );
         }
 
         EndMode2D();
 
-        // Screen-space atmospheric wash
-        DrawRectangle(0, 0, VIRTUAL_WIDTH, VIRTUAL_HEIGHT, { 20, 12, 8, 45 });
-        for (int i = 0; i < 5; ++i) {
-            unsigned char a = (unsigned char)(18 + i * 10);
-            DrawRectangle(0, 0, VIRTUAL_WIDTH, 40 + i * 18, { 0, 0, 0, a });
-            DrawRectangle(0, VIRTUAL_HEIGHT - 50 - i * 16, VIRTUAL_WIDTH, 50 + i * 16, { 0, 0, 0, a });
+        // Vignette overlay
+        for (int i = 0; i < 6; ++i) {
+            float a = 35.0f + i * 10.0f;
+            DrawRectangle(-i * 25, -i * 25, WORLD_WIDTH + i * 50, WORLD_HEIGHT + i * 50,
+                          { 0, 0, 0, (unsigned char)a });
         }
 
         EndTextureMode();
         return;
     }
 
-    // --- Live gameplay simulation ---
+    // --- Original live gameplay simulation ---
+    // Sky: vertical gradient
     for (int strip = 0; strip < WORLD_HEIGHT; strip += 80) {
         float t = (float)strip / (float)WORLD_HEIGHT;
         unsigned char r = (unsigned char)(15 + t * 10);

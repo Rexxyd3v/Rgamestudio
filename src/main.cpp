@@ -10,6 +10,11 @@
 #include "screens/lobby_screen.h"
 #include "network/network_manager.h"
 #include "utils/texture_manager.h"
+#include "voice/voice_chat.h"
+
+// Global voice chat instance
+VoiceChat voiceChat;
+bool voiceInitialized = false;
 
 int main() {
     SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_VSYNC_HINT);
@@ -17,6 +22,12 @@ int main() {
     InitWindow(VIRTUAL_WIDTH, VIRTUAL_HEIGHT, "Soooon");
     InitAudioDevice(); // Initialize audio device
     SetTargetFPS(60);
+
+    // Initialize voice chat system
+    voiceInitialized = voiceChat.initialize();
+    if (!voiceInitialized) {
+        TraceLog(LOG_WARNING, "Failed to initialize voice chat system");
+    }
 
     NetworkManager::GetInstance().Initialize();
 
@@ -33,6 +44,17 @@ int main() {
         if (IsKeyPressed(KEY_F11)) {
             ToggleFullscreen();
         }
+
+        // Handle push-to-talk with C key
+        if (IsKeyDown(KEY_C)) {
+            voiceChat.setTransmitEnabled(true);
+        } else {
+            voiceChat.setTransmitEnabled(false);
+        }
+
+        // Update voice chat system
+        voiceChat.captureAudio();
+        voiceChat.updatePlayback(GetFrameTime());
 
         float deltaTime = GetFrameTime();
         

@@ -28,6 +28,9 @@ public:
 
 private:
     bool useCinematic = true;
+    // In this codebase build, we don't have a DUSK_PARALLAX option wired.
+    bool useParallaxBackdrop = false;
+
 
     std::vector<BotEnemy*> bots;
 

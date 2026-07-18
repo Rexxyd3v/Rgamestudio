@@ -7,6 +7,9 @@
 #include <math.h>
 #include <algorithm>
 #include <cstring>
+#include "../voice/voice_chat.h"
+extern VoiceChat voiceChat;
+
 
 // Simple clamp helper (raylib Clamp may not be available without raymath)
 static inline float fclamp(float val, float lo, float hi) {
@@ -555,7 +558,12 @@ bool GameplayScreen::Update(float deltaTime) {
     return true;
 }
 
+
+
+
 void GameplayScreen::Draw(RenderTexture2D target) {
+
+
     BeginTextureMode(target);
     // Sky: vertical gradient from deep space blue at top to dark midnight at bottom
     ClearBackground({15, 15, 35, 255});
@@ -739,7 +747,24 @@ void GameplayScreen::Draw(RenderTexture2D target) {
     for (auto* rp : remotePlayers) rp->DrawUI();
     for (auto* b : offlineBots) b->DrawUI();
 
+    // ---- Voice speaking indicator (green dot above head) ----
+    auto drawSpeakDot = [](Vector2 worldPos, float jumpOffset, bool speaking) {
+        if (!speaking) return;
+        Vector2 p = worldPos;
+        p.y -= jumpOffset;
+        DrawCircleV(p, 7.0f, GREEN);
+    };
+
+    // Local player
+    drawSpeakDot(player->GetPosition(), player->GetJumpHeight() + 10.0f, voiceChat.isLocalSpeaking());
+
+    // Remote players
+    for (auto* rp : remotePlayers) {
+        drawSpeakDot(rp->GetPosition(), rp->GetJumpHeight() + 10.0f, voiceChat.isUserSpeaking(rp->peerID));
+    }
+
     EndMode2D();
+
 
 
     // HUD (drawn in screen space, not world space)
