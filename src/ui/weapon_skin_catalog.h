@@ -13,6 +13,12 @@ enum class WeaponSkinId {
     COUNT // keep last
 };
 
+// Returns the prefix path for weapon textures for this skin and weapon slot.
+std::string GetWeaponSlotSkinPath(int slot, int skinId);
+
+// Returns the tint color for the weapon-specific skin selection and slot.
+Color GetWeaponSlotSkinTint(int slot, int skinId);
+
 // Returns the prefix path for weapon textures for this skin.
 // For example, if returns "assets/WeaponSkins/Default/", then weapon textures are
 // <prefix>weaponR1.png, weaponR2.png, weaponR3.png.

@@ -2,6 +2,7 @@
 #include "../utils/texture_manager.h"
 #include "ui_theme.h"
 #include <math.h>
+#include <filesystem>
 
 // raylib Color constants compatibility
 #ifndef DARKRED
@@ -73,20 +74,31 @@ void WeaponSkinPreview::Update(float deltaTime) {
 void WeaponSkinPreview::DrawPreview(Rectangle area, int skinId, Font font) {
     (void)skinId;
     (void)font; // unused since we draw custom shapes now
+
+    // This preview draws the currently selected weapon-slot skins
+    // stored in selectedSkins[]. Do not ignore input skinId here.
+
     lastArea = area; // Cache area for Update method to check hits
+
 
     // Draw background panel
     DrawRectangleRec(area, Fade(BLACK, 0.30f));
     DrawRectangleLinesEx(area, 1.5f, Fade(UiTheme::AccentGold(), 0.35f));
 
+
+
+
     const float cropX = 350.0f;
-    const float cropY = 1350.0f;
+    const float cropY = 1150.0f;
     const float cropW = 1400.0f;
-    const float cropH = 450.0f;
+    const float cropH = 650.0f;
 
     // Draw the single active weapon centered in the stage panel
-    if (selectedWeaponSlot >= 0 && selectedWeaponSlot < (int)weaponTextures.size()) {
-        Texture2D& tex = weaponTextures[selectedWeaponSlot];
+    if (selectedWeaponSlot >= 0 && selectedWeaponSlot < 3) {
+        int activeSkin = selectedSkins[selectedWeaponSlot];
+        std::string skinPrefix = GetWeaponSlotSkinPath(selectedWeaponSlot, activeSkin);
+        std::string texturePath = skinPrefix + "weaponR" + std::to_string(selectedWeaponSlot + 1) + ".png";
+        Texture2D tex = TextureManager::GetTexture(texturePath);
         if (tex.id != 0) {
             float weaponScale = 0.26f; // Nice large centered weapon scale (doesn't cut off)
             float w = cropW * weaponScale;
@@ -104,7 +116,9 @@ void WeaponSkinPreview::DrawPreview(Rectangle area, int skinId, Font font) {
             dst.x += w / 2.0f;
             dst.y += h / 2.0f;
 
-            DrawTexturePro(tex, src, dst, origin, offset, GetWeaponSkinTint(selectedSkins[selectedWeaponSlot]));
+            DrawTexturePro(tex, src, dst, origin, offset, GetWeaponSlotSkinTint(selectedWeaponSlot, activeSkin));
+
+
         }
     }
 
@@ -124,6 +138,8 @@ void WeaponSkinPreview::DrawPreview(Rectangle area, int skinId, Font font) {
     DrawRectangleRec(btnPrev, Fade(UiTheme::ButtonIdle(), 0.5f + hoverPrev * 0.5f));
     DrawRectangleLinesEx(btnPrev, 1.5f, Fade(hoverPrev > 0.01f ? UiTheme::AccentGold() : UiTheme::PanelBorder(), 0.5f + hoverPrev * 0.5f));
     Color arrowPrevColor = hoverPrev > 0.01f ? UiTheme::AccentGold() : UiTheme::TextPrimary();
+
+
     DrawTriangle(
         { btnPrev.x + 14.0f, btnPrev.y + 20.0f },
         { btnPrev.x + 26.0f, btnPrev.y + 29.0f },
@@ -135,6 +151,8 @@ void WeaponSkinPreview::DrawPreview(Rectangle area, int skinId, Font font) {
     DrawRectangleRec(btnNext, Fade(UiTheme::ButtonIdle(), 0.5f + hoverNext * 0.5f));
     DrawRectangleLinesEx(btnNext, 1.5f, Fade(hoverNext > 0.01f ? UiTheme::AccentGold() : UiTheme::PanelBorder(), 0.5f + hoverNext * 0.5f));
     Color arrowNextColor = hoverNext > 0.01f ? UiTheme::AccentGold() : UiTheme::TextPrimary();
+
+
     DrawTriangle(
         { btnNext.x + 26.0f, btnNext.y + 20.0f },
         { btnNext.x + 14.0f, btnNext.y + 11.0f },
@@ -153,7 +171,14 @@ int WeaponSkinPreview::DrawSelector(Rectangle area, Font font, int& selectedSkin
     int clickedSkin = -1;
 
     for (int i = 0; i < skinsCount; ++i) {
-        bool locked = (i > 0); // Only default (0) is unlocked in this template
+        bool locked = false;
+        if (i > 0) {
+            std::string weaponFolderName = "SMG";
+            if (selectedWeaponSlot == 1) weaponFolderName = "Shotgun";
+            else if (selectedWeaponSlot == 2) weaponFolderName = "Pistol";
+            std::string folder = "assets/WeaponSkins/Skin" + std::to_string(i) + "/" + weaponFolderName + "/";
+            locked = !std::filesystem::exists(folder);
+        }
 
         Rectangle card = {
             area.x + i * (cardW + gap),
@@ -164,22 +189,26 @@ int WeaponSkinPreview::DrawSelector(Rectangle area, Font font, int& selectedSkin
 
         bool isCurrentSelected = (selectedSkins[selectedWeaponSlot] == i);
 
-        // Card background
-        Color bg = {22, 24, 32, 200};
-        if (locked) {
-            bg = {30, 30, 40, 150};
-        } else if (isCurrentSelected) {
-            bg = Color{ 40, 36, 28, 230 };
-        }
-        
+        // Card background (theme-consistent)
+        Color bg = UiTheme::PanelBg();
+        bg.a = (unsigned char)(bg.a * 0.85f);
+
         bool hovered = !locked && CheckCollisionPointRec(mouse, card);
-        if (hovered) bg = Color{ 34, 36, 48, 220 };
-        
+
+        if (locked) {
+            bg = Fade(UiTheme::PanelBg(), 0.55f);
+        } else if (isCurrentSelected) {
+            bg = Fade(Color{ 40, 36, 28, 255 }, 0.90f);
+        } else if (hovered) {
+            bg = Fade(Color{ 34, 36, 48, 255 }, 0.88f);
+        }
+
         DrawRectangleRec(card, bg);
 
         Color border = isCurrentSelected ? UiTheme::AccentGold() : UiTheme::PanelBorder();
         float borderThick = isCurrentSelected ? 2.5f : 1.0f;
-        DrawRectangleLinesEx(card, borderThick, Fade(border, isCurrentSelected ? 1.0f : 0.4f));
+        DrawRectangleLinesEx(card, borderThick, Fade(border, isCurrentSelected ? 1.0f : 0.45f));
+
 
         // Get label names for skins
         const char* label = "Default";
@@ -197,12 +226,14 @@ int WeaponSkinPreview::DrawSelector(Rectangle area, Font font, int& selectedSkin
 
         if (!locked) {
             // Draw active weapon icon in the card with wide crop and padding
-            Texture2D tex = weaponTextures[selectedWeaponSlot];
+            std::string skinPrefix = GetWeaponSlotSkinPath(selectedWeaponSlot, i);
+            std::string texturePath = skinPrefix + "weaponR" + std::to_string(selectedWeaponSlot + 1) + ".png";
+            Texture2D tex = TextureManager::GetTexture(texturePath);
             if (tex.id != 0) {
                 const float cropX = 350.0f;
-                const float cropY = 1350.0f;
+                const float cropY = 1150.0f;
                 const float cropW = 1400.0f;
-                const float cropH = 450.0f;
+                const float cropH = 650.0f;
 
                 // Scale down slightly more to leave space (width fits within cardW - 30px)
                 float scale = (cardW - 30.0f) / cropW; 
@@ -213,7 +244,7 @@ int WeaponSkinPreview::DrawSelector(Rectangle area, Font font, int& selectedSkin
 
                 Rectangle src = { cropX, cropY, cropW, cropH };
                 Rectangle dst = { x, y, w, h };
-                DrawTexturePro(tex, src, dst, { 0, 0 }, 0.0f, GetWeaponSkinTint(i));
+                DrawTexturePro(tex, src, dst, { 0, 0 }, 0.0f, GetWeaponSlotSkinTint(selectedWeaponSlot, i));
             }
         } else {
             // Draw locked icon style

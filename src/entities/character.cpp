@@ -90,14 +90,38 @@ Character::Character(Vector2 startPosition, const std::string& assetPath, float 
     currentWeaponIndex = 0;
     weaponSkinId = weaponSkin;
     currentWeaponSkin = weaponSkin;
-    std::string skinPrefix = WeaponSkinPath(static_cast<WeaponSkinId>(weaponSkin));
-    if (skinPrefix.empty()) {
-        // Fallback to default skin if invalid
-        skinPrefix = "assets/WeaponSkins/Default/";
-    }
-    weaponTextures.push_back(TextureManager::GetTexture(skinPrefix + "weaponR1.png"));
-    weaponTextures.push_back(TextureManager::GetTexture(skinPrefix + "weaponR2.png"));
-    weaponTextures.push_back(TextureManager::GetTexture(skinPrefix + "weaponR3.png"));
+
+    // Per-slot fallback:
+    // - slot 0 (SMG) uses weaponR1.png
+    // - slot 1 (Shotgun) uses weaponR2.png
+    // - slot 2 (Pistol) uses weaponR3.png
+    weaponTextures.clear();
+
+    auto loadSlotTexture = [&](int slot, int skinId) -> Texture2D {
+        std::string skinPrefix = WeaponSkinPath(static_cast<WeaponSkinId>(skinId));
+        if (skinPrefix.empty()) {
+            skinPrefix = "assets/WeaponSkins/Default/";
+        }
+        // keep existing path scheme in this codebase:
+        // - slot 0 expects weaponR1.png
+        // - slot 1 expects weaponR2.png
+        // - slot 2 expects weaponR3.png
+        std::string png = "weaponR" + std::to_string(slot + 1) + ".png";
+        return TextureManager::GetTexture(skinPrefix + png);
+    };
+
+    // Try selected skin first; if that specific slot texture is missing, fallback to default skin only for that slot.
+    Texture2D t0 = loadSlotTexture(0, weaponSkinId);
+    if (t0.id == 0) t0 = loadSlotTexture(0, 0);
+    weaponTextures.push_back(t0);
+
+    Texture2D t1 = loadSlotTexture(1, weaponSkinId);
+    if (t1.id == 0) t1 = loadSlotTexture(1, 0);
+    weaponTextures.push_back(t1);
+
+    Texture2D t2 = loadSlotTexture(2, weaponSkinId);
+    if (t2.id == 0) t2 = loadSlotTexture(2, 0);
+    weaponTextures.push_back(t2);
 }
 
 Character::~Character() {
@@ -140,18 +164,28 @@ void Character::SetWeaponSkin(int weaponSkin) {
     }
     weaponTextures.clear();
 
-    // Load new weapon textures based on the weapon skin
-    std::string weaponPath = "assets/Free 2D Animated Vector Game Character Sprites/Free 2D Animated Vector Game Character Sprites/Weapons/";
     weaponSkinId = weaponSkin;
     currentWeaponSkin = weaponSkin;
-    std::string skinPrefix = WeaponSkinPath(static_cast<WeaponSkinId>(weaponSkin));
-    if (skinPrefix.empty()) {
-        // Fallback to default skin if invalid
-        skinPrefix = "assets/WeaponSkins/Default/";
-    }
-    weaponTextures.push_back(TextureManager::GetTexture(skinPrefix + "weaponR1.png"));
-    weaponTextures.push_back(TextureManager::GetTexture(skinPrefix + "weaponR2.png"));
-    weaponTextures.push_back(TextureManager::GetTexture(skinPrefix + "weaponR3.png"));
+
+    auto loadSlot = [&](int slot, int skinId) -> Texture2D {
+        // Slot path selection uses per-slot folders (SMG/Shotgun/Pistol)
+        std::string slotPath = GetWeaponSlotSkinPath(slot, skinId);
+        std::string png = "weaponR" + std::to_string(slot + 1) + ".png";
+        return TextureManager::GetTexture(slotPath + png);
+    };
+
+    // Per-slot fallback only (no global "any missing => default all").
+    Texture2D t0 = loadSlot(0, weaponSkinId);
+    if (t0.id == 0) t0 = loadSlot(0, 0);
+    weaponTextures.push_back(t0);
+
+    Texture2D t1 = loadSlot(1, weaponSkinId);
+    if (t1.id == 0) t1 = loadSlot(1, 0);
+    weaponTextures.push_back(t1);
+
+    Texture2D t2 = loadSlot(2, weaponSkinId);
+    if (t2.id == 0) t2 = loadSlot(2, 0);
+    weaponTextures.push_back(t2);
 
     // Reset to first weapon if the current weapon index is out of bounds
     if (currentWeaponIndex < 0 || currentWeaponIndex >= static_cast<int>(weaponTextures.size())) {
@@ -266,60 +300,83 @@ void Character::Draw() {
     static float lastFrameTime = 0.016f;
     if (muzzleFlashTimer > 0.0f) muzzleFlashTimer -= GetFrameTime();
 
-    if (!isMonster && !IsDead() && weaponTextures.size() > 0 && weaponTextures[currentWeaponIndex].id != 0) {
-        Texture2D currentTex = weaponTextures[currentWeaponIndex];
-        float weaponScale = scale * 0.45f;
-        Vector2 hand = GetHandPosition();
+    if (!isMonster && !IsDead()) {
+        // Always try to draw a weapon. If the selected weapon skin texture failed to load,
+        // fallback to the default skin so the gun is never invisible.
+        Texture2D currentTex = {0};
+        bool haveGun = false;
 
-        float dx = aimTarget.x - hand.x;
-        float dy = aimTarget.y - hand.y;
-        float rotation = 0.0f;
-        if (fabsf(dx) > 0.01f || fabsf(dy) > 0.01f) {
-            float angleDeg = atan2f(dy, dx) * RAD2DEG;
-            rotation = (faceDirection == 1) ? angleDeg : angleDeg - 180.0f;
+        if (!weaponTextures.empty() && currentWeaponIndex >= 0 && currentWeaponIndex < (int)weaponTextures.size()) {
+            currentTex = weaponTextures[currentWeaponIndex];
+            haveGun = (currentTex.id != 0);
         }
 
-        float pivotX = (faceDirection == 1)
-                       ? 960.0f * weaponScale
-                       : (2048.0f - 960.0f) * weaponScale;
-        float pivotY = 1580.0f * weaponScale;
+        if (!haveGun) {
+            std::string defSMG = GetWeaponSlotSkinPath(0, 0);
+            std::string defShotgun = GetWeaponSlotSkinPath(1, 0);
+            std::string defPistol = GetWeaponSlotSkinPath(2, 0);
+            std::string defPrefix = (currentWeaponIndex == 0) ? defSMG : (currentWeaponIndex == 1 ? defShotgun : defPistol);
+            currentTex = TextureManager::GetTexture(defPrefix + "weaponR" + std::to_string(currentWeaponIndex + 1) + ".png");
+            haveGun = (currentTex.id != 0);
+        }
 
-        Rectangle srcRec = { 0.0f, 0.0f,
-                              (float)currentTex.width  * faceDirection,
-                              (float)currentTex.height };
-        Rectangle dstRec = { hand.x, hand.y,
-                              (float)currentTex.width  * weaponScale,
-                              (float)currentTex.height * weaponScale };
-        Vector2 origin = { pivotX, pivotY };
-        DrawTexturePro(currentTex, srcRec, dstRec, origin, rotation, GetWeaponSkinTint(weaponSkinId));
+        if (haveGun && currentTex.id != 0) {
+            float weaponScale = scale * 0.45f;
+            Vector2 hand = GetHandPosition();
 
-        // Draw muzzle flash if recently fired
-        if (muzzleFlashTimer > 0.0f) {
-            Texture2D muzzleTex = TextureManager::GetTexture(
-                "assets/Free 2D Animated Vector Game Character Sprites/"
-                "Free 2D Animated Vector Game Character Sprites/Extras/muzzle.png");
-            if (muzzleTex.id != 0) {
-                float muzzleScale = scale * 0.55f;
-                // Compute barrel tip position (a bit further along the aim direction from the hand)
-                float dx2 = aimTarget.x - hand.x;
-                float dy2 = aimTarget.y - hand.y;
-                float len2 = sqrtf(dx2*dx2 + dy2*dy2);
-                Vector2 muzzleDir = (len2 > 0.1f) ? Vector2{dx2/len2, dy2/len2} : Vector2{1.0f, 0.0f};
-                Vector2 muzzlePos = { hand.x + muzzleDir.x * 40.0f, hand.y + muzzleDir.y * 40.0f };
+            float dx = aimTarget.x - hand.x;
+            float dy = aimTarget.y - hand.y;
+            float rotation = 0.0f;
+            if (fabsf(dx) > 0.01f || fabsf(dy) > 0.01f) {
+                float angleDeg = atan2f(dy, dx) * RAD2DEG;
+                rotation = (faceDirection == 1) ? angleDeg : angleDeg - 180.0f;
+            }
 
-                Rectangle mSrc = { 0, 0, (float)muzzleTex.width * faceDirection, (float)muzzleTex.height };
-                Rectangle mDst = { muzzlePos.x, muzzlePos.y,
-                                   (float)muzzleTex.width * muzzleScale,
-                                   (float)muzzleTex.height * muzzleScale };
-                Vector2 mOrigin = { (float)muzzleTex.width * muzzleScale / 2.0f,
-                                    (float)muzzleTex.height * muzzleScale / 2.0f };
-                DrawTexturePro(muzzleTex, mSrc, mDst, mOrigin, rotation, WHITE);
+            float pivotX = (faceDirection == 1)
+                               ? 960.0f * weaponScale
+                               : (2048.0f - 960.0f) * weaponScale;
+            float pivotY = 1580.0f * weaponScale;
+
+            Rectangle srcRec = { 0.0f, 0.0f,
+                                  (float)currentTex.width  * faceDirection,
+                                  (float)currentTex.height };
+            Rectangle dstRec = { hand.x, hand.y,
+                                  (float)currentTex.width  * weaponScale,
+                                  (float)currentTex.height * weaponScale };
+            Vector2 origin = { pivotX, pivotY };
+            DrawTexturePro(currentTex, srcRec, dstRec, origin, rotation,
+                           GetWeaponSlotSkinTint(currentWeaponIndex, weaponSkinId));
+
+            if (muzzleFlashTimer > 0.0f) {
+                Texture2D muzzleTex = TextureManager::GetTexture(
+                    "assets/Free 2D Animated Vector Game Character Sprites/"
+                    "Free 2D Animated Vector Game Character Sprites/Extras/muzzle.png");
+                if (muzzleTex.id != 0) {
+                    float muzzleScale = scale * 0.55f;
+
+                    float dx2 = aimTarget.x - hand.x;
+                    float dy2 = aimTarget.y - hand.y;
+                    float len2 = sqrtf(dx2*dx2 + dy2*dy2);
+                    Vector2 muzzleDir = (len2 > 0.1f) ? Vector2{dx2/len2, dy2/len2} : Vector2{1.0f, 0.0f};
+                    Vector2 muzzlePos = { hand.x + muzzleDir.x * 40.0f, hand.y + muzzleDir.y * 40.0f };
+
+                    Rectangle mSrc = { 0, 0, (float)muzzleTex.width * faceDirection, (float)muzzleTex.height };
+                    Rectangle mDst = { muzzlePos.x, muzzlePos.y,
+                                       (float)muzzleTex.width * muzzleScale,
+                                       (float)muzzleTex.height * muzzleScale };
+                    Vector2 mOrigin = { (float)muzzleTex.width * muzzleScale / 2.0f,
+                                        (float)muzzleTex.height * muzzleScale / 2.0f };
+                    DrawTexturePro(muzzleTex, mSrc, mDst, mOrigin, rotation, WHITE);
+                }
             }
         }
     }
 
-    for (auto& proj : projectiles) proj->Draw();
+    for (auto& proj : projectiles) {
+        proj->Draw();
+    }
 }
+
 
 void Character::DrawUI() {
     float draw_y = position.y - jumpHeight;
