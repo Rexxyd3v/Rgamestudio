@@ -1,4 +1,2 @@
 cd /c/Users/rexje/Rgamestudio
-g++ src/*.cpp src/screens/*.cpp src/utils/*.cpp src/entities/*.cpp src/network/*.cpp src/ui/*.cpp src/voice/*.cpp -o bin/Rgamestudio.exe -lws2_32
-
 g++ src/*.cpp src/screens/*.cpp src/utils/*.cpp src/entities/*.cpp src/network/*.cpp src/ui/*.cpp src/voice/*.cpp -o bin/Rgamestudio.exe -lws2_32 $(pkg-config --libs raylib) $(pkg-config --libs opus) $(pkg-config --libs libenet) $(pkg-config --libs miniaudio)
