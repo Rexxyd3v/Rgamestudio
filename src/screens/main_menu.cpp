@@ -44,6 +44,7 @@ MainMenuScreen::~MainMenuScreen() {
         UnloadFont(menuFont);
     }
 
+    UnloadSound(choiceSound);
     UnloadMusicStream(mainMenuMusic);
 }
 

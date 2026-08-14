@@ -20,7 +20,7 @@
 // Multiplier applied on top of the "fit the whole map" zoom, to make the map/frame appear bigger. 1.0 = exact fit
 // (no cropping). Values above 1.0 zoom in a bit more, which may crop a small amount off the map's edges since an
 // explicit whole-map viewport is used for drawing (nothing breaks, it just won't all be visible on screen).
-#define ZOOM_BOOST 1.35f
+#define ZOOM_BOOST 1.0f
 
 #define PLAYER_SPEED_IN_PIXELS_PER_SECOND 80.0f
 #define POLYGON_POINTS_COUNT 6
@@ -81,6 +81,28 @@ static Polygon TranslatePolygon(Polygon poly, float dx, float dy)
     poly.aabb.y += dy;
 
     return poly;
+}
+
+// Get a squashed Polygon representing only the feet for collision detection.
+static Polygon GetFeetPolygon(Polygon poly)
+{
+    Polygon feet = poly;
+    float scaleY = 0.4f; // Feet take up bottom 40% of the character
+    float offsetY = poly.radius * (1.0f - scaleY);
+    
+    feet.center.y += offsetY;
+    feet.radius *= scaleY; // Approximate for if it's used elsewhere
+    
+    for (int i = 0; i < POLYGON_POINTS_COUNT; i++)
+    {
+        float relY = poly.points[i].y - poly.center.y;
+        feet.points[i].y = poly.center.y + offsetY + (relY * scaleY);
+    }
+    
+    feet.aabb.height *= scaleY;
+    feet.aabb.y += offsetY;
+    
+    return feet;
 }
 
 // Comparison function for sorting depth objects by bottom Y coordinate (ascending)
@@ -169,7 +191,7 @@ int main(void)
 
     // The "player" always spawns at the center of the map, and its size is scaled by the fit zoom so that it
     // stays a sensible, visible size on screen instead of ballooning past the frame.
-    Polygon poly = GetPolygon(mapCenter, ((float)map->tileWidth/3.0f));
+    Polygon poly = GetPolygon(mapCenter, ((float)map->tileWidth/2.0f));
 
     // Allocate memory for depth objects
     DepthObject *depthObjects = NULL;
@@ -210,23 +232,26 @@ int main(void)
             // Translate the player one axis at a time. If this movement leads the player to hit a wall, revert the
             // player's position for just that axis.
             poly = TranslatePolygon(poly, velocity.x, 0.0f);
+            Polygon feetPolyX = GetFeetPolygon(poly);
 
 #if CHECK_COLLISION_OBJECT_GROUP
-            if (CheckCollisionTMXObjectGroupPoly(wallsObjectGroup, poly.points, POLYGON_POINTS_COUNT, NULL))
+            if (CheckCollisionTMXObjectGroupPoly(wallsObjectGroup, feetPolyX.points, POLYGON_POINTS_COUNT, NULL))
 #else
-            if (CheckCollisionTMXTileLayersPolyEx(map, map->layers, map->layersLength, poly.points,
-                POLYGON_POINTS_COUNT, poly.aabb, NULL))
+            if (CheckCollisionTMXTileLayersPolyEx(map, map->layers, map->layersLength, feetPolyX.points,
+                POLYGON_POINTS_COUNT, feetPolyX.aabb, NULL))
 #endif
             {
                 poly = TranslatePolygon(poly, -velocity.x, 0.0f); // Undo the X translation.
             }
 
             poly = TranslatePolygon(poly, 0.0f, velocity.y);
+            Polygon feetPolyY = GetFeetPolygon(poly);
+
 #if CHECK_COLLISION_OBJECT_GROUP
-            if (CheckCollisionTMXObjectGroupPoly(wallsObjectGroup, poly.points, POLYGON_POINTS_COUNT, NULL))
+            if (CheckCollisionTMXObjectGroupPoly(wallsObjectGroup, feetPolyY.points, POLYGON_POINTS_COUNT, NULL))
 #else
-            if (CheckCollisionTMXTileLayersPolyEx(map, map->layers, map->layersLength, poly.points,
-                POLYGON_POINTS_COUNT, poly.aabb, NULL))
+            if (CheckCollisionTMXTileLayersPolyEx(map, map->layers, map->layersLength, feetPolyY.points,
+                POLYGON_POINTS_COUNT, feetPolyY.aabb, NULL))
 #endif
             {
                 poly = TranslatePolygon(poly, 0.0f, -velocity.y); // Undo the Y translation.

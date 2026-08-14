@@ -14,13 +14,17 @@ struct WeaponStats {
 };
 
 static const WeaponStats WEAPONS[] = {
-    { 30, 1.5f, 0.15f, 1000.0f, 500.0f, 12.0f }, // SMG (Weapon 1)
-    { 6,  2.0f, 0.8f,  700.0f,  350.0f, 40.0f }, // Shotgun (Weapon 2)
-    { 12, 1.2f, 0.4f,  750.0f,  900.0f, 20.0f }  // Pistol (Weapon 3)
+    { 30, 1.5f, 0.15f, 1000.0f, 1200.0f, 12.0f }, // SMG (Weapon 1)      range: 500  -> 1200
+    { 6,  2.0f, 0.8f,  700.0f,  900.0f,  40.0f }, // Shotgun (Weapon 2)  range: 350  -> 900
+    { 12, 1.2f, 0.4f,  750.0f, 1800.0f, 20.0f }  // Pistol (Weapon 3)   range: 900  -> 1800
 };
 
 // Static combat audio flag — disabled during menu background simulation
 bool Character::combatAudioEnabled = true;
+// Static debug-draw flag — when true, every Character::DrawDebugCollision()
+// call renders the foot AABB and circle in colored outlines so you can see
+// exactly where the collision shape is in the world.
+bool Character::debugDrawCollision = false;
 
 static void PlayWeaponSound(int index) {
     static Sound sounds[3] = { {0}, {0}, {0} };
@@ -150,12 +154,7 @@ void Character::SetState(CharState newState) {
 }
 
 void Character::SetWeaponSkin(int weaponSkin) {
-    // Clear existing weapon textures
-    for (auto& texture : weaponTextures) {
-        if (texture.id != 0) {
-            UnloadTexture(texture);
-        }
-    }
+    // Clear existing weapon textures from local array
     weaponTextures.clear();
 
     weaponSkinId = weaponSkin;
@@ -222,6 +221,132 @@ Vector2 Character::GetHandPosition() const {
     float hand_x = position.x + (1170.0f - 1024.0f) * scale * faceDirection;
     float hand_y = draw_y      + (1580.0f - 1024.0f) * scale;
     return { hand_x, hand_y };
+}
+
+// ---------------------------------------------------------------------------
+// Foot-anchored collision shape.
+//
+// Animation::Draw renders the current frame centered on (position.x,
+// position.y - jumpHeight) with origin = (tex.width*scale/2,
+// tex.height*scale/2). The visible sprite therefore spans:
+//     x: [position.x - sw/2, position.x + sw/2]
+//     y: [draw_y       - sh/2, draw_y       + sh/2]
+// where sw = tex.width*scale, sh = tex.height*scale.
+//
+// We want a *small* collision shape that hugs the feet — not a body-sized
+// box. The full body of the character (head, arms, gun sticking out) is
+// well over 100 px wide at the default scale; if the AABB covers all of
+// that the character sticks to walls from far away and feels "magnetic".
+//
+// The box is sized in absolute world units (not as a fraction of the
+// sprite) so it stays the same size regardless of how big the sprite is
+// drawn. It is anchored to the *bottom* of the visible sprite (the feet),
+// with a small height covering just the boots/lower legs.
+// ---------------------------------------------------------------------------
+
+// Half-width of the foot box (world units). 4 means an 8 px wide AABB
+// straddling the sprite center — narrow enough to let the character walk
+// close to walls without the visible body snagging, but wide enough to
+// prevent ghosting though thin collision objects.
+static const float FOOT_HALF_W = 4.0f;
+// Height of the foot box (world units). 6 means a thin 6 px tall sliver
+// right at the feet — covers just the boot/sole, nothing more.
+static const float FOOT_HEIGHT = 6.0f;
+
+Vector2 Character::GetCollisionSize() const {
+    // Box is intentionally small and constant — it does not scale with
+    // the sprite, so a big character still has the same foot footprint
+    // as a small one. Callers can scale with `scale` if they need a
+    // proportional footprint.
+    float cw = FOOT_HALF_W * 2.0f;
+    float ch = FOOT_HEIGHT;
+    return { cw, ch };
+}
+
+Rectangle Character::GetCollisionBounds() const {
+    Vector2 size = GetCollisionSize();
+    float draw_y = position.y - jumpHeight;
+
+    // Anchor to the feet: bottom of the box sits at the bottom of the
+    // visible sprite. The sprite's bottom edge is draw_y + sh/2, so
+    // the box top is (draw_y + sh/2) - ch.
+    auto it = animations.find(currentState);
+    if (it == animations.end() || !it->second || !it->second->HasFrames()) {
+        // Fallback: a small box centered on the character.
+        return { position.x - size.x * 0.5f,
+                 draw_y     - size.y * 0.5f,
+                 size.x, size.y };
+    }
+    int   texH = it->second->FrameHeight();
+    float sh   = (float)texH * scale;
+    float top  = (draw_y + sh * 0.5f) - size.y;
+
+    return { position.x - size.x * 0.5f,
+             top,
+             size.x, size.y };
+}
+
+Character::Circle Character::GetFeetCircle() const {
+    Vector2 size = GetCollisionSize();
+    float draw_y = position.y - jumpHeight;
+    float sh = 0.0f;
+    auto it = animations.find(currentState);
+    if (it != animations.end() && it->second && it->second->HasFrames()) {
+        sh = (float)it->second->FrameHeight() * scale;
+    }
+    // Small circle at the feet — same size as half the AABB so the
+    // circle fits inside the rectangle.
+    float radius = size.x < size.y ? size.x * 0.5f : size.y * 0.5f;
+    // Sit the circle at the bottom-center of the AABB (the feet).
+    float feetY = (draw_y + sh * 0.5f) - radius;
+    return { { position.x, feetY }, radius };
+}
+
+// ---------------------------------------------------------------------------
+// Debug draw — visualizes the foot AABB and circle so the collision shape
+// can be inspected in-game. Toggle with Character::SetDebugDrawCollision().
+//
+// Layout:
+//   * Yellow outline rectangle = the AABB from GetCollisionBounds().
+//   * Green filled circle       = the circle from GetFeetCircle().
+//   * Magenta dot               = the sprite center (position.x, draw_y).
+//   * Red horizontal line       = the visible sprite's feet line.
+//
+// The line + dot are there so you can confirm the box really IS at the
+// feet (not floating in the body) and that the box matches the visible
+// sprite's footprint.
+// ---------------------------------------------------------------------------
+void Character::DrawDebugCollision() const {
+    if (!debugDrawCollision) return;
+
+    Rectangle box = GetCollisionBounds();
+    Circle    foot = GetFeetCircle();
+    float     draw_y = position.y - jumpHeight;
+
+    // AABB outline (yellow, slightly thick for visibility)
+    DrawRectangleLines((int)box.x, (int)box.y,
+                       (int)box.width, (int)box.height, YELLOW);
+
+    // Inner feet circle (green outline + faint green fill)
+    DrawCircleV(foot.center, foot.radius, Fade(GREEN, 0.20f));
+    DrawCircleLines((int)foot.center.x, (int)foot.center.y,
+                    foot.radius, GREEN);
+
+    // Sprite center crosshair (magenta)
+    DrawLine((int)position.x - 6, (int)draw_y,
+             (int)position.x + 6, (int)draw_y, MAGENTA);
+    DrawLine((int)position.x, (int)draw_y - 6,
+             (int)position.x, (int)draw_y + 6, MAGENTA);
+
+    // Feet line (red horizontal across the visible bottom of the sprite)
+    auto it = animations.find(currentState);
+    if (it != animations.end() && it->second && it->second->HasFrames()) {
+        float sh = (float)it->second->FrameHeight() * scale;
+        float feetY = draw_y + sh * 0.5f;
+        DrawLine((int)(position.x - sh * 0.5f), (int)feetY,
+                 (int)(position.x + sh * 0.5f), (int)feetY,
+                 Fade(RED, 0.6f));
+    }
 }
 
 bool Character::Shoot(Vector2 targetPos) {
@@ -296,11 +421,7 @@ void Character::Draw() {
         DrawCircleLines((int)position.x, (int)draw_y + 30, 42.0f, shieldBlue);
         DrawCircleLines((int)position.x, (int)draw_y + 30, 44.0f, shieldDarkBlue);
     }
-    // Update muzzle flash timer
-    // (we tick it here since Draw is called every frame and avoids adding an Update call to the base class)
-    // Note: Not perfectly frame-rate independent but sufficient for a quick flash effect
-    static float lastFrameTime = 0.016f;
-    if (muzzleFlashTimer > 0.0f) muzzleFlashTimer -= GetFrameTime();
+    // Update muzzle flash timer moved to Update()
 
     if (!isMonster && !IsDead()) {
         // Always try to draw a weapon. If the selected weapon skin texture failed to load,
@@ -380,6 +501,10 @@ void Character::Draw() {
     for (auto& proj : projectiles) {
         proj->Draw();
     }
+
+    // Debug visualization of the collision shape — no-op unless the
+    // global flag is set via Character::SetDebugDrawCollision(true).
+    DrawDebugCollision();
 }
 
 
@@ -487,6 +612,8 @@ bool Character::ActivateShield() {
 }
 
 void Character::UpdateSkills(float deltaTime) {
+    if (muzzleFlashTimer > 0.0f) muzzleFlashTimer -= deltaTime;
+
     if (dashTimer > 0.0f) {
         dashTimer -= deltaTime;
         float dashSpeed = speed * 3.0f;

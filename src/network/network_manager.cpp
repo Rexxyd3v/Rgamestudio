@@ -28,7 +28,7 @@ NetworkManager::NetworkManager()
       localWeaponSkin(0), // default weapon skin
       localKills(0),
       localDeaths(0),
-      selectedMapId(0),   // default map Beach
+      selectedMapName("Forest"),
       waitingForAssignment(false),
       nextPlayerID(1), // Host is always 0; clients start at 1, monotonically increasing
       joinState(JoinState::IDLE),
@@ -899,7 +899,8 @@ bool NetworkManager::StartGame() {
     PacketGameStart startPacket{};
     startPacket.header.type = PacketType::GAME_START;
     startPacket.header.playerID = localPlayerID; // Host's ID is 0
-    startPacket.mapId = selectedMapId;
+    std::strncpy(startPacket.mapName, selectedMapName.c_str(), sizeof(startPacket.mapName) - 1);
+    startPacket.mapName[sizeof(startPacket.mapName) - 1] = '\0';
 
     SendPacket(&startPacket, sizeof(startPacket), true);
     return true;

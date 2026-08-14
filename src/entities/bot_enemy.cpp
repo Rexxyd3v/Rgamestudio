@@ -19,7 +19,7 @@ const float DEMO_AGGRO_RANGE    = 950.0f;
 const float DEMO_MOVE_RANGE     =  60.0f;  // always closing in
 
 BotEnemy::BotEnemy(Vector2 startPosition, const std::string& assetPath)
-    : Character(startPosition, assetPath, 0.08f), stateTimer(0.0f), isMoving(false), deathTimer(0.0f),
+    : Character(startPosition, assetPath, 0.15f), stateTimer(0.0f), isMoving(false), deathTimer(0.0f),
       strafeDir(1.0f), strafeTimer(0.0f) {
     this->speed = BOT_SPEED;
     this->shootCooldown = BOT_SHOOT_COOLDOWN;
@@ -233,6 +233,7 @@ void BotEnemy::UpdateAI(float deltaTime, Vector2 playerPosition) {
             }
         }
 
+        bool wantsToWalk = false;
         if (isMoving) {
             float tDx = targetPosition.x - position.x;
             float tDy = targetPosition.y - position.y;
@@ -241,17 +242,15 @@ void BotEnemy::UpdateAI(float deltaTime, Vector2 playerPosition) {
             if (tDist > 10.0f) {
                 velocity.x = (tDx / tDist) * speed;
                 velocity.y = (tDy / tDist) * speed;
-                SetState(CharState::WALK);
+                wantsToWalk = true;
             } else {
                 isMoving = false;
                 velocity.x = 0;
                 velocity.y = 0;
-                SetState(CharState::IDLE);
             }
         } else {
             velocity.x = 0;
             velocity.y = 0;
-            SetState(CharState::IDLE);
         }
 
         // Random jump while moving
@@ -271,8 +270,10 @@ void BotEnemy::UpdateAI(float deltaTime, Vector2 playerPosition) {
             ActivateShield();
         }
 
-        position.x += velocity.x * deltaTime;
-        position.y += velocity.y * deltaTime;
+        if (dashTimer <= 0.0f) {
+            position.x += velocity.x * deltaTime;
+            position.y += velocity.y * deltaTime;
+        }
 
         // Shoot if in aggro range
         if (distance < BOT_AGGRO_RANGE && currentShootCooldown <= 0.0f) {
@@ -281,14 +282,27 @@ void BotEnemy::UpdateAI(float deltaTime, Vector2 playerPosition) {
         }
 
         // ---- JUMP / FALL state picking (override walk/idle) ----
-        if (!isOnGround && jumpVelocity > 0.0f) {
-            if (startedJump || currentState != CharState::JUMP_START) {
-                SetState(CharState::JUMP_START);
+        if (!isOnGround) {
+            if (jumpVelocity > 0.0f) {
+                if (startedJump || currentState != CharState::JUMP_START) {
+                    SetState(CharState::JUMP_START);
+                }
+            } else {
+                SetState(CharState::FALL);
             }
-        } else if (!isOnGround && jumpVelocity <= 0.0f) {
-            SetState(CharState::FALL);
-        } else if (isOnGround && (currentState == CharState::JUMP_START || currentState == CharState::FALL)) {
-            SetState(CharState::JUMP_END);
+        } else {
+            bool jumpEndDone = (currentState == CharState::JUMP_END &&
+                                animations.count(CharState::JUMP_END) &&
+                                animations[CharState::JUMP_END]->IsFinished());
+
+            if (currentState == CharState::JUMP_START || currentState == CharState::FALL) {
+                SetState(CharState::JUMP_END);
+            } else if (currentState == CharState::JUMP_END && !jumpEndDone) {
+                // Still playing JUMP_END; let it finish before transitioning
+            } else {
+                if (wantsToWalk) SetState(CharState::WALK);
+                else             SetState(CharState::IDLE);
+            }
         }
     }
 }

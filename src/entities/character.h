@@ -28,6 +28,13 @@ public:
     virtual void Draw();
     virtual void DrawUI(); // Renders overhead HUD elements (health bar, IGN) after world objects
 
+    // Debug visualization of the foot-anchored collision shape (AABB + circle).
+    // Toggled globally with SetDebugDrawCollision(); safe to call from any
+    // screen that wants to see why a character is or isn't colliding.
+    virtual void DrawDebugCollision() const;
+    static void SetDebugDrawCollision(bool enabled) { debugDrawCollision = enabled; }
+    static bool IsDebugDrawCollision()                { return debugDrawCollision; }
+
     Vector2 GetPosition() const   { return position; }
     void    SetPosition(Vector2 pos) { position = pos; }
     int     GetFaceDirection() const { return faceDirection; }
@@ -93,21 +100,45 @@ public:
     void  SetBaseHeight(float h)   { baseHeight = h; }
 
     // Depth-sort key: the world Y of the character's feet. Higher Y = drawn
-    // in front; lower Y = drawn behind. Uses the same baseline as Draw()
-    // (position.y - jumpHeight) so the sorted order matches the visual order.
-    virtual float GetDepthY() const { return position.y - jumpHeight + feetOffset; }
-
-    // AABB used for prop collision. Matches the existing projectile hitbox
-    // (HIT_HALF_W / HIT_TOP_OFF / HIT_BOT_OFF) so the character's footprint
-    // is consistent between projectiles and rocks/trees.
-    virtual Rectangle GetCollisionBounds() const {
-        return {
-            position.x - 22.0f,
-            (position.y - jumpHeight) + 0.0f,
-            44.0f,
-            60.0f
-        };
+    // in front; lower Y = drawn behind.
+    // Uses the actual visual bottom edge of the sprite (position.y - jumpHeight + spriteHeight/2)
+    // so the sorted order matches what the player actually sees.
+    virtual float GetDepthY() const {
+        auto it = animations.find(currentState);
+        if (it != animations.end() && it->second && it->second->HasFrames()) {
+            float draw_y = position.y - jumpHeight;
+            float sh = (float)it->second->FrameHeight() * scale;
+            return draw_y + sh * 0.5f; // actual bottom edge of sprite = feet
+        }
+        return position.y - jumpHeight + feetOffset; // fallback
     }
+
+    // ------------------------------------------------------------------
+    // Collision shape (foot-anchored, small).
+    //
+    // The old hardcoded 36x40 box was too small relative to the visible
+    // sprite (a Char1 drawn at 0.08 scale is ~164 px wide) and sat in
+    // the *middle* of the body, not at the feet. That made characters
+    // feel like they hit walls from far away.
+    //
+    // The new shape is a tiny box (12x6 by default) anchored to the
+    // *bottom* of the visible sprite — the character's feet. It is
+    // intentionally small so the player can walk through tight gaps
+    // (between rocks, through narrow TMX walls) without the visible
+    // arms/gun "magnetically" sticking to nearby walls.
+    // ------------------------------------------------------------------
+
+    // Width and height (in world units) of the foot-anchored collision box.
+    Vector2 GetCollisionSize() const;
+
+    // World-space AABB of the foot-anchored collision box. The bottom of
+    // the box is the bottom of the visible sprite (the feet); the box
+    // is centered horizontally on the sprite.
+    Rectangle GetCollisionBounds() const;
+
+    // Small circle at the feet, for code that wants a smooth shape.
+    struct Circle { Vector2 center; float radius; };
+    Circle GetFeetCircle() const;
 
     // Alpha multiplier for drawing (0.0f to 1.0f). Override in subclasses for effects like fade-in.
     virtual float GetDrawAlpha() const { return 1.0f; }
@@ -178,6 +209,7 @@ protected:
     int                                      currentWeaponSkin;
 
     static bool combatAudioEnabled;
+    static bool debugDrawCollision;
 
     void    LoadAnimations(const std::string& baseDir);
     void    SetState(CharState newState);

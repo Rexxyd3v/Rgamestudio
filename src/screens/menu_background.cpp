@@ -13,42 +13,7 @@ static inline float fclamp(float val, float lo, float hi) {
     return val < lo ? lo : (val > hi ? hi : val);
 }
 
-Rectangle MenuBackground::Rock::CollisionBounds() const {
-    float w = texW * scale * 0.58f;
-    float h = texH * scale * 0.40f;
-    float cx = position.x;
-    float cy = position.y + texH * scale * 0.06f;
-    return { cx - w * 0.5f, cy - h * 0.5f, w, h };
-}
 
-void MenuBackground::Rock::Draw() const {
-    if (!tex || tex->id == 0) return;
-    // rock
-    float w = tex->width  * scale;
-    float h = tex->height * scale;
-    Vector2 orig = { w / 2.0f, h / 2.0f };
-    Rectangle src = { 0, 0, (float)tex->width, (float)tex->height };
-    Rectangle dst = { position.x, position.y, w, h };
-    DrawTexturePro(*tex, src, dst, orig, rotation, tint);
-}
-
-Rectangle MenuBackground::Tree::TrunkBounds() const {
-    float halfSprH = texH * scale * 0.5f;
-    float trunkBot = position.y + halfSprH;
-    float trunkTop = trunkBot - trunkHeightPx * scale;
-    float halfW    = trunkWidth * 0.5f;
-    return { position.x - halfW, trunkTop, trunkWidth, trunkHeightPx * scale };
-}
-
-void MenuBackground::Tree::Draw() const {
-    if (!tex || tex->id == 0) return;
-    float w = tex->width * scale;
-    float h = tex->height * scale;
-    Vector2 orig = { w / 2.0f, h / 2.0f };
-    Rectangle src = { 0, 0, (float)tex->width, (float)tex->height };
-    Rectangle dst = { position.x, position.y, w, h };
-    DrawTexturePro(*tex, src, dst, orig, 0.0f, WHITE);
-}
 
 // --- Hit / collision helpers (mirrors main_level.cpp) ------------------------
 
@@ -142,73 +107,18 @@ MenuBackground::~MenuBackground() {
 }
 
 void MenuBackground::InitWorld() {
-    // Load textures
-    std::string basePath = "assets/Maps/Beach/";
-    bgTex     = TextureManager::GetTexture(basePath + "background.png");
-    rockTex   = TextureManager::GetTexture(basePath + "rocks.png");
-    rockTex1  = TextureManager::GetTexture(basePath + "rocks.png");
-    rockTex2  = TextureManager::GetTexture(basePath + "rocks.png");
-    palmTree1 = TextureManager::GetTexture(basePath + "tree1.png");
-    palmTree2 = TextureManager::GetTexture(basePath + "tree2.png");
-
-    // ---- Rocks (subset matching main_level.cpp) ----
-    rocks = {
-        {{400.0f,   500.0f},  0.55f, 90.0f,  -5.0f, {220, 210, 190, 255}, 0, nullptr, 0, 0},
-        {{900.0f,   900.0f},  0.75f, 120.0f,  8.0f, {210, 200, 180, 255}, 0, nullptr, 0, 0},
-        {{1600.0f,  400.0f},  0.45f, 70.0f, -12.0f, {230, 215, 195, 255}, 0, nullptr, 0, 0},
-        {{2200.0f,  1100.0f}, 0.65f, 105.0f,  6.0f, {215, 205, 185, 255}, 0, nullptr, 0, 0},
-        {{2800.0f,  700.0f},  0.50f, 80.0f,  -8.0f, {220, 208, 188, 255}, 0, nullptr, 0, 0},
-        {{3400.0f,  1500.0f}, 0.70f, 112.0f, 10.0f, {210, 200, 180, 255}, 0, nullptr, 0, 0},
-        {{1100.0f,  1600.0f}, 0.45f, 72.0f, -15.0f, {225, 212, 193, 255}, 0, nullptr, 0, 0},
-        {{2600.0f,  350.0f},  0.55f, 88.0f,   4.0f, {215, 203, 183, 255}, 0, nullptr, 0, 0},
-        {{700.0f,   1400.0f}, 0.60f, 96.0f,  -7.0f, {220, 208, 188, 255}, 0, nullptr, 0, 0},
-        {{3000.0f,  1700.0f}, 0.40f, 64.0f,  12.0f, {228, 216, 195, 255}, 0, nullptr, 0, 0},
-        {{500.0f,  1200.0f},  0.50f, 80.0f, -18.0f, {200, 190, 170, 255}, 1, nullptr, 0, 0},
-        {{1400.0f,  700.0f},  0.45f, 72.0f,  14.0f, {195, 185, 165, 255}, 1, nullptr, 0, 0},
-        {{3200.0f,  500.0f},  0.60f, 95.0f, -10.0f, {205, 193, 175, 255}, 1, nullptr, 0, 0},
-        {{150.0f,   750.0f},  0.50f, 80.0f,   5.0f, {230, 220, 195, 255}, 2, nullptr, 0, 0},
-        {{2000.0f,  600.0f},  0.40f, 64.0f,   7.0f, {232, 222, 198, 255}, 2, nullptr, 0, 0},
-    };
-    for (auto& r : rocks) {
-        r.platformTop = r.position.y - r.radius * 0.8f;
-        Texture2D* t = (r.type == 1) ? &rockTex1 : (r.type == 2) ? &rockTex2 : &rockTex;
-        r.tex  = t;
-        r.texW = (float)t->width;
-        r.texH = (float)t->height;
+    auto mapNames = MapRegistry::GetInstance().GetMapNames();
+    std::string mapName = "Forest";
+    if (!mapNames.empty()) {
+        int randomIndex = GetRandomValue(0, (int)mapNames.size() - 1);
+        mapName = mapNames[randomIndex];
     }
+    currentMapData = MapRegistry::GetInstance().GetMap(mapName);
 
-    // ---- Trees (subset matching main_level.cpp) ----
-    struct PalmInit {
-        Vector2 position;
-        float   scale;
-        int     type;
-        float   trunkH;
-        float   trunkW;
-    };
-    const PalmInit palmInits[] = {
-        {{500.0f,  800.0f},  0.6f,  0, 110.0f, 0.30f},
-        {{3500.0f, 700.0f},  0.7f,  1, 110.0f, 0.30f},
-        {{800.0f,  1500.0f}, 0.5f,  0, 110.0f, 0.30f},
-        {{3200.0f, 1300.0f}, 0.6f,  1, 110.0f, 0.30f},
-        {{1500.0f, 300.0f},  0.55f, 0, 110.0f, 0.30f},
-        {{1500.0f, 1700.0f}, 0.65f, 1, 110.0f, 0.30f},
-    };
-    for (const auto& init : palmInits) {
-        Tree t{};
-        t.position       = init.position;
-        t.scale          = init.scale;
-        t.type           = init.type;
-        t.trunkHeightPx  = init.trunkH;
-        t.trunkWidthFrac = init.trunkW;
-        Texture2D* tex = (init.type == 0) ? &palmTree1 : &palmTree2;
-        t.tex = tex;
-        t.texW = (float)tex->width;
-        t.texH = (float)tex->height;
-        t.trunkHeight  = t.texH * t.scale;
-        t.trunkWidth   = t.texW * t.scale * t.trunkWidthFrac;
-        t.trunkOffsetX = (t.texW * t.scale - t.trunkWidth) * 0.5f;
-        trees.push_back(t);
-    }
+    std::string basePath = currentMapData ? currentMapData->folderPath : "assets/Maps/Forest/";
+    std::string bgName   = (currentMapData && !currentMapData->scene.bgTexture.empty()) ? currentMapData->scene.bgTexture : "background.png";
+
+    bgTex = TextureManager::GetTexture(basePath + bgName);
 }
 
 void MenuBackground::InitEntities(int localSkinIndex) {
@@ -269,7 +179,7 @@ void MenuBackground::InitEntities(int localSkinIndex) {
 // In spectator mode there is no player, so bots only target each other.
 Character* MenuBackground::GetNearestTargetForBot(BotEnemy* b) {
     Character* nearest = nullptr;
-    float minDist = 999999.0f;
+    float minDist = 1e9f;
 
     for (auto other : bots) {
         if (other == b || other->IsDead()) continue;
@@ -385,20 +295,21 @@ void MenuBackground::TickWorld(float deltaTime) {
     // --- World collision (rocks + tree trunks) ---
     auto resolveWorld = [&](Character* c) {
         if (!c) return;
-        for (int pass = 0; pass < 2; ++pass) {
-            Rectangle cb = c->GetCollisionBounds();
-            for (const auto& t : trees) {
-                Rectangle tb = t.TrunkBounds();
-                if (CheckCollisionRecs(cb, tb)) {
-                    ResolveCollisionPush(c, cb, tb);
-                    cb = c->GetCollisionBounds();
-                }
-            }
-            for (const auto& r : rocks) {
-                Rectangle rb = r.CollisionBounds();
-                if (CheckCollisionRecs(cb, rb)) {
-                    ResolveCollisionPush(c, cb, rb);
-                    cb = c->GetCollisionBounds();
+        Rectangle cb = c->GetCollisionBounds();
+        if (currentMapData && currentMapData->tmxMap) {
+            for (uint32_t i = 0; i < currentMapData->tmxMap->layersLength; i++) {
+                TmxLayer& layer = currentMapData->tmxMap->layers[i];
+                if (layer.type == LAYER_TYPE_OBJECT_GROUP) {
+                    for (uint32_t j = 0; j < layer.exact.objectGroup.objectsLength; j++) {
+                        const TmxObject& obj = layer.exact.objectGroup.objects[j];
+                        if (obj.type == OBJECT_TYPE_RECTANGLE) {
+                            Rectangle objRect = { (float)obj.x, (float)obj.y - 32.0f, (float)obj.width, (float)obj.height };
+                            if (CheckCollisionRecs(cb, objRect)) {
+                                ResolveCollisionPush(c, cb, objRect);
+                                cb = c->GetCollisionBounds();
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -517,33 +428,6 @@ void MenuBackground::DrawScene() {
                 }
             }
         }
-
-        // Draw some silhouette rocks/trees WITHOUT depth sorting complexity
-        // (blur post-process makes it look good even if not perfect).
-        for (const auto& r : rocks) {
-            // darker silhouettes
-            DrawTexturePro(
-                *r.tex,
-                { 0, 0, (float)r.tex->width, (float)r.tex->height },
-                { r.position.x, r.position.y, r.tex->width * r.scale, r.tex->height * r.scale },
-                { (r.tex->width * r.scale) / 2.0f, (r.tex->height * r.scale) / 2.0f },
-                r.rotation, { 0, 0, 0, 70 }
-            );
-        }
-        for (const auto& t : trees) {
-            float w = t.texW * t.scale;
-            float h = t.texH * t.scale;
-            Vector2 orig = { w / 2.0f, h / 2.0f };
-            DrawTexturePro(
-                *t.tex,
-                { 0, 0, (float)t.tex->width, (float)t.tex->height },
-                { t.position.x, t.position.y, w, h },
-                orig,
-                0.0f,
-                { 0, 0, 0, 55 }
-            );
-        }
-
         EndMode2D();
 
         // Vignette overlay
@@ -569,8 +453,16 @@ void MenuBackground::DrawScene() {
 
     BeginMode2D(camera);
 
-    // Tiled beach background
-    if (bgTex.id != 0 && bgTex.width > 0) {
+    // Render map background (TMX or tiled image)
+    if (currentMapData && currentMapData->tmxMap) {
+        float viewW = VIRTUAL_WIDTH / camera.zoom;
+        float viewH = VIRTUAL_HEIGHT / camera.zoom;
+        Rectangle viewport = { camera.target.x - viewW * 0.5f,
+                               camera.target.y - viewH * 0.5f,
+                               viewW,
+                               viewH };
+        DrawTMX(currentMapData->tmxMap, &camera, &viewport, 0, 0, WHITE);
+    } else if (bgTex.id != 0 && bgTex.width > 0) {
         int cols = (int)(WORLD_WIDTH  / bgTex.width)  + 2;
         int rows = (int)(WORLD_HEIGHT / bgTex.height) + 2;
         for (int y = 0; y < rows; ++y) {
@@ -587,18 +479,7 @@ void MenuBackground::DrawScene() {
     };
     std::vector<RenderItem> items;
 
-    for (const auto& t : trees) {
-        RenderItem it;
-        it.depthY = t.GetDepthY();
-        it.draw = [&t]() { t.Draw(); };
-        items.push_back(it);
-    }
-    for (const auto& r : rocks) {
-        RenderItem it;
-        it.depthY = r.GetDepthY();
-        it.draw = [&r]() { r.Draw(); };
-        items.push_back(it);
-    }
+
     for (auto* b : bots) {
         RenderItem it;
         it.depthY = b->GetDepthY();

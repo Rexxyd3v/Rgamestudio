@@ -1,6 +1,6 @@
 #include "remote_player.h"
 
-static const float CHAR_SCALE = 0.08f;
+static const float CHAR_SCALE = 0.15f;
 
 
 static const std::string CHAR_PATH = "assets/Free 2D Animated Vector Game Character Sprites/Free 2D Animated Vector Game Character Sprites/Full body animated characters/";

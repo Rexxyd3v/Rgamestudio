@@ -1,42 +1,37 @@
 #include "map_catalog.h"
+#include "../map_loader/MapRegistry.h"
 #include <raylib.h>
-
-const char* MapPath(MapId id) {
-    switch (id) {
-        case MapId::Beach:  return "assets/Maps/Beach/";
-        case MapId::Space:  return "assets/Maps/Space/";
-        case MapId::Forest: return "assets/Maps/Forest/";
-        default: return "";
-    }
-}
+#include <string>
+#include <vector>
+#include <cctype>
 
 std::vector<Ui::GalleryItem> GetMapGalleryItems() {
     static std::vector<Ui::GalleryItem> items;
     static bool initialized = false;
     if (!initialized) {
-        for (int i = 0; i < static_cast<int>(MapId::COUNT); ++i) {
-            MapId id = static_cast<MapId>(i);
-            const char* path = MapPath(id);
-            bool locked = false; // all maps now unlocked
+        MapRegistry& registry = MapRegistry::GetInstance();
+        auto mapNames = registry.GetMapNames();
+        // Static vector to keep labels alive (GalleryItem uses const char*)
+        static std::vector<std::string> persistentLabels;
+        persistentLabels.clear();
+        persistentLabels.reserve(mapNames.size());
+        for (const auto& name : mapNames) {
+            MapData* mapData = registry.GetMap(name);
+            if (!mapData) continue;
+            
             // Thumbnail texture: try to load preview.png from map folder
             Texture2D tex = {0};
-            if (path && path[0] != '\0') {
-                std::string previewPath = std::string(path) + "preview.png";
-                if (FileExists(previewPath.c_str())) {
-                    tex = TextureManager::GetTexture(previewPath);
-                } else {
-                    std::string fallbackPath = std::string(path) + "background.png";
-                    tex = TextureManager::GetTexture(fallbackPath);
-                }
+            std::string previewPath = mapData->folderPath + "preview.png";
+            if (FileExists(previewPath.c_str())) {
+                tex = TextureManager::GetTexture(previewPath);
             }
-            const char* label = "";
-            switch (id) {
-                case MapId::Beach:  label = "BEACH";  break;
-                case MapId::Space:  label = "SPACE";  break;
-                case MapId::Forest: label = "FOREST"; break;
-                default: label = "???"; break;
-            }
-            items.push_back({ tex, label, locked });
+            
+            // Use folder name as label - capitalize first letter
+            std::string labelStr = name;
+            if (!labelStr.empty()) labelStr[0] = (char)toupper(labelStr[0]);
+            persistentLabels.push_back(labelStr);
+            
+            items.push_back({ tex, persistentLabels.back().c_str(), false });
         }
         initialized = true;
     }

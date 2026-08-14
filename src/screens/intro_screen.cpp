@@ -35,8 +35,12 @@ FirstScreen::FirstScreen() {
 }
 
 FirstScreen::~FirstScreen() {
-    UnloadFont(gamefont);
-    UnloadFont(secondFont);
+    if (gamefont.texture.id != GetFontDefault().texture.id) {
+        UnloadFont(gamefont);
+    }
+    if (secondFont.texture.id != GetFontDefault().texture.id) {
+        UnloadFont(secondFont);
+    }
 }
 
 bool FirstScreen::Update(float deltaTime) {

@@ -10,6 +10,7 @@
 #include "screens/offline_menu.h"
 #include "screens/lobby_screen.h"
 #include "network/network_manager.h"
+#include "map_loader/MapRegistry.h"
 #include "utils/texture_manager.h"
 #include "voice/proximity_voice_chat.h"
 
@@ -50,6 +51,12 @@ int main() {
         TraceLog(LOG_WARNING, "Failed to initialize voice chat system");
     }
 
+    MapRegistry::GetInstance().LoadAllMaps();
+    auto mapNames = MapRegistry::GetInstance().GetMapNames();
+    if (!mapNames.empty()) {
+        NetworkManager::GetInstance().selectedMapName = mapNames.front();
+    }
+
     NetworkManager::GetInstance().Initialize();
 
     RenderTexture2D target = LoadRenderTexture(VIRTUAL_WIDTH, VIRTUAL_HEIGHT);
@@ -61,6 +68,7 @@ int main() {
     bool isOnlineMenuActive = false;
     bool isOfflineMenuActive = false;
     bool isLobbyActive = false;
+    bool isGameplayActive = false;
 
     while (!WindowShouldClose()) {
         if (IsKeyPressed(KEY_F11)) {
@@ -102,6 +110,7 @@ int main() {
                         delete currentScreen;
                         currentScreen = new GameplayScreen(GameMode::OFFLINE);
                         isOfflineMenuActive = false;
+                        isGameplayActive = true;
                     } else {
                         // User backed out to main menu
                         delete currentScreen;
@@ -115,6 +124,7 @@ int main() {
                         delete currentScreen;
                         currentScreen = new GameplayScreen(GameMode::ONLINE);
                         isOnlineMenuActive = false;
+                        isGameplayActive = true;
                     } else if (menu->ShouldGoToLobby()) {
                         // Go to lobby screen
                         delete currentScreen;
@@ -134,12 +144,18 @@ int main() {
                         delete currentScreen;
                         currentScreen = new GameplayScreen(GameMode::ONLINE);
                         isLobbyActive = false;
+                        isGameplayActive = true;
                     } else {
                         delete currentScreen;
                         currentScreen = new MainMenuScreen();
                         isLobbyActive = false;
                         isMainMenuActive = true;
                     }
+                } else if (isGameplayActive) {
+                    delete currentScreen;
+                    currentScreen = new MainMenuScreen();
+                    isGameplayActive = false;
+                    isMainMenuActive = true;
                 } else {
                     delete currentScreen;
                     currentScreen = nullptr;

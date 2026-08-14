@@ -273,7 +273,9 @@ int WeaponSkinPreview::DrawSelector(Rectangle area, Font font, int& selectedSkin
         if (CheckCollisionPointRec(mouse, card) && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
             if (!locked) {
                 clickedSkin = i;
-                selectedSkins[selectedWeaponSlot] = i;
+                selectedSkins[0] = i;
+                selectedSkins[1] = i;
+                selectedSkins[2] = i;
             }
         }
     }

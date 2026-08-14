@@ -96,12 +96,12 @@ struct PacketPlayerDisconnectHeader {
 
 struct PacketGameStart {
     PacketHeader header;
-    int mapId; // MapId enum value
+    char mapName[64]; // Map folder name from MapRegistry
 };
 
 struct PacketMapChanged {
     PacketHeader header;
-    int mapId; // MapId enum value
+    char mapName[64]; // Map folder name from MapRegistry
 };
 
 // Voice data packet (Opus encoded audio)

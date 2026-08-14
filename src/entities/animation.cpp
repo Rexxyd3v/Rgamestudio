@@ -53,3 +53,13 @@ void Animation::Reset() {
 bool Animation::IsFinished() const {
     return finished;
 }
+
+int Animation::FrameWidth() const {
+    if (frames.empty()) return 0;
+    return frames[0].width;
+}
+
+int Animation::FrameHeight() const {
+    if (frames.empty()) return 0;
+    return frames[0].height;
+}

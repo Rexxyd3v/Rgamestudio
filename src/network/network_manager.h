@@ -77,8 +77,7 @@ public:
     int localWeaponSkin;
     int localKills;
     int localDeaths;
-    int selectedMapId; // Map selection ID (0 = Beach)
-
+    std::string selectedMapName; // Map folder name from registry (e.g. "Forest")
 
 private:
     NetworkManager();
