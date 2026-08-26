@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to build/release (e.g. v3.0.0)"
+        required: true
+        type: string
 
 jobs:
   build-windows:
@@ -15,6 +21,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref }}
 
       - name: Setup MSYS2
         uses: msys2/setup-msys2@v2
@@ -53,12 +61,15 @@ jobs:
         shell: msys2 {0}
         run: |
           mkdir -p bin
+          ENET_PC=libenet
+          pkg-config --exists libenet || ENET_PC=enet
 
           g++ \
             src/*.cpp \
             src/screens/*.cpp \
             src/utils/*.cpp \
             src/map_loader/*.cpp \
+            src/map_loader/scenes/*.cpp \
             src/entities/*.cpp \
             src/network/*.cpp \
             src/ui/*.cpp \
@@ -66,14 +77,8 @@ jobs:
             -std=c++17 \
             -O2 \
             -o bin/Rgamestudio.exe \
-            $(pkg-config --cflags raylib opus) \
-            -I/ucrt64/include \
-            -lraylib \
-            -lenet \
-            -lopus \
-            -lopusfile \
-            -lvorbis \
-            -lvorbisfile \
+            $(pkg-config --cflags raylib opus $ENET_PC miniaudio) \
+            $(pkg-config --libs raylib opus $ENET_PC miniaudio) \
             -lws2_32 \
             -lwinmm \
             -lgdi32 \
@@ -104,11 +109,22 @@ jobs:
 
           echo "Collecting required DLLs..."
 
-          ldd bin/Rgamestudio.exe | grep '/ucrt64/bin' | awk '{print $3}' | while read dll; do
+          ldd bin/Rgamestudio.exe | awk '/\/ucrt64\/bin\// {print $3}' | sort -u | while read -r dll; do
             if [ -f "$dll" ]; then
               cp "$dll" release_package/
             fi
           done
+
+          missing=0
+          for dep in $(ldd bin/Rgamestudio.exe | awk '/\/ucrt64\/bin\// {print $1}'); do
+            if [ ! -f "release_package/$dep" ]; then
+              echo "ERROR: Missing runtime DLL in package: $dep"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            exit 1
+          fi
 
           echo "Release package:"
           find release_package -maxdepth 2 -type f
@@ -116,7 +132,7 @@ jobs:
       - name: Create Release ZIP
         shell: pwsh
         run: |
-          $tag = "${{ github.ref_name }}"
+          $tag = if ("${{ github.event_name }}" -eq "workflow_dispatch") { "${{ github.event.inputs.tag }}" } else { "${{ github.ref_name }}" }
           $zip = "Rgamestudio-$tag-windows.zip"
 
           if (Test-Path $zip) {
@@ -134,10 +150,10 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
-          name: "Rgamestudio ${{ github.ref_name }}"
+          tag_name: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}
+          name: "Rgamestudio ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}"
           body: |
-            # Rgamestudio ${{ github.ref_name }}
+            # Rgamestudio ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}
 
             ## Download
 
@@ -145,7 +161,7 @@ jobs:
 
             ## How to Play
 
-            1. Download `Rgamestudio-${{ github.ref_name }}-windows.zip`
+            1. Download `Rgamestudio-${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}-windows.zip`
             2. Extract the ZIP.
             3. Open the extracted folder.
             4. Run `Rgamestudio.exe`.
@@ -154,9 +170,10 @@ jobs:
 
             - Windows 10/11
             - 64-bit Windows
+            - No manual library download required (all runtime DLLs are bundled)
 
           files: |
-            Rgamestudio-${{ github.ref_name }}-windows.zip
+            Rgamestudio-${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}-windows.zip
           draft: false
           prerelease: false
           fail_on_unmatched_files: true
