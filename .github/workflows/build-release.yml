@@ -42,6 +42,7 @@ jobs:
             src/*.cpp \
             src/screens/*.cpp \
             src/utils/*.cpp \
+            src/map_loader/*.cpp \
             src/entities/*.cpp \
             src/network/*.cpp \
             src/ui/*.cpp \
