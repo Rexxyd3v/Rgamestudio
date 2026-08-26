@@ -77,7 +77,7 @@ jobs:
             -std=c++17 \
             -O2 \
             -o bin/Rgamestudio.exe \
-            $(pkg-config --cflags raylib opus $ENET_PC miniaudio) \
+            -I. $(pkg-config --cflags raylib opus $ENET_PC miniaudio) \
             $(pkg-config --libs raylib opus $ENET_PC miniaudio) \
             -lws2_32 \
             -lwinmm \
