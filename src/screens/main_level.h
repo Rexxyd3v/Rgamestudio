@@ -59,6 +59,19 @@ private:
     std::vector<BotEnemy*> offlineBots;       // Offline AI opponents
     std::vector<RemotePlayer*> remotePlayers; // Online opponents
 
+    // Elimination / round-flow state (online host-authoritative, mirrored on clients).
+    bool  isSpectating        = false;
+    bool  roundInProgress     = false;
+    float roundBannerTimer    = 0.0f;
+    float matchEndTimer       = 0.0f;
+    int   currentRoundNumber  = 0;
+    int   lastRoundWinnerID   = 0;
+
+    // Pause menu state
+    bool isPaused = false;
+    float hoverResume = 0.0f;
+    float hoverQuit = 0.0f;
+
     Camera2D camera;
 
     Texture2D bgTex1;
@@ -76,8 +89,15 @@ private:
     // Networking helpers
     void PollNetworkEvents(float deltaTime);
     RemotePlayer* FindOrCreateRemotePlayer(uint32_t playerID, int charSkin, int weaponSkin = 0);
+    RemotePlayer* FindByPeerID(uint32_t playerID);
 
     void RemoveRemotePlayer(uint32_t playerID);
+
+    // Mode-specific helpers
+    Vector2 GetTeamSpawnPoint(int teamID) const;
+    int     CountAliveOnTeam(int teamID) const;
+    void    BroadcastRoundStart(int roundNumber);
+    void    BroadcastRoundEnd(int winningTeamID, int grScore, int blScore);
 
     // Physics & collision helpers
     void  ResolveWorldCollision(Character* c);

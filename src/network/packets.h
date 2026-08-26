@@ -8,6 +8,12 @@
 #include <raylib.h>
 #include <stdint.h>
 
+enum class OnlineGameMode : uint8_t {
+    ELIMINATION = 0,
+    FREE_FOR_ALL,
+    TEAM_DEATHMATCH
+};
+
 enum class PacketType : uint8_t {
     ID_ASSIGNMENT = 0,  // Host -> Client: grants the authoritative playerID
     PLAYER_CONNECT,     // Player info announcement (used for both new and existing)
@@ -20,6 +26,10 @@ enum class PacketType : uint8_t {
     PLAYER_RESPAWN,     // Event: player respawned
     GAME_START,         // Host signals game should start
     MAP_CHANGED,        // Host signals selected map changed
+    LOBBY_SETTINGS,     // Host signals mode/limit changed
+    PLAYER_TEAM_CHANGE, // Client requests team change / Host broadcasts
+    ROUND_START,        // Host signals start of elimination round
+    ROUND_END,          // Host signals end of elimination round
     VOICE_DATA          // Voice audio data (Opus encoded)
 };
 
@@ -44,6 +54,7 @@ struct PacketPlayerConnect {
     char username[20];
     int charSkin;     // 1, 2, 3, or 4
     int weaponSkin;   // WeaponSkinId enum value
+    int teamID;       // 0 = None, 1 = Global Risk (Blue), 2 = Black List (Red)
 };
 
 struct PacketPlayerUpdate {
@@ -89,6 +100,11 @@ struct PacketPlayerReady {
     bool isReady;  // True if player is ready, false otherwise
 };
 
+struct PacketPlayerTeamChange {
+    PacketHeader header;
+    int teamID; // 1 = Global Risk, 2 = Black List
+};
+
 struct PacketPlayerDisconnectHeader {
     PacketHeader header;
     // No additional data needed for disconnect notification
@@ -102,6 +118,26 @@ struct PacketGameStart {
 struct PacketMapChanged {
     PacketHeader header;
     char mapName[64]; // Map folder name from MapRegistry
+};
+
+struct PacketLobbySettings {
+    PacketHeader header;
+    OnlineGameMode gameMode;
+    int timeLimit;
+    int killLimit;
+    int roundLimit;
+};
+
+struct PacketRoundStart {
+    PacketHeader header;
+    int roundNumber;
+};
+
+struct PacketRoundEnd {
+    PacketHeader header;
+    int winningTeamID; // 0 = Draw, 1 = GR, 2 = BL
+    int grScore;
+    int blScore;
 };
 
 // Voice data packet (Opus encoded audio)

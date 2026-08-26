@@ -44,6 +44,7 @@ int main() {
 
     InitAudioDevice(); // Initialize audio device
     SetTargetFPS(60);
+    SetExitKey(KEY_NULL); // Prevent Raylib from auto-closing the window on ESC
 
     // Initialize voice chat system
     proximityVoiceInitialized = proximityVoiceChat.initialize();

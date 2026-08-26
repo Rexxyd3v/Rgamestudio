@@ -5,7 +5,6 @@
 #include "../entities/animation.h"
 #include <string>
 
-// Loads idle animations + head portraits for Char 1..4 and draws a selectable gallery.
 class CharacterPreview {
 public:
     static constexpr int kCount = 4;

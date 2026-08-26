@@ -16,6 +16,11 @@ inline constexpr Color TextDark()     { return { 28, 24, 20, 255 }; }
 inline constexpr Color ReadyGreen()   { return { 90, 200, 120, 255 }; }
 inline constexpr Color Danger()       { return { 210, 70, 70, 255 }; }
 inline constexpr Color SkyAccent()    { return { 120, 190, 230, 255 }; }
+
+// Team colors (Crossfire-style). Use TeamBlue() for Global Risk, TeamRed() for Black List.
+inline constexpr Color TeamBlue()     { return { 80, 150, 230, 255 }; }
+inline constexpr Color TeamRed()      { return { 220, 70,  70,  255 }; }
+
 inline constexpr Color ButtonIdle()   { return { 28, 30, 40, 200 }; }
 inline constexpr Color ButtonHover()  { return { 42, 46, 60, 230 }; }
 inline constexpr Color DimOverlay()   { return { 0, 0, 0, 140 }; }

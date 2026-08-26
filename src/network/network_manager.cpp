@@ -16,19 +16,28 @@
 // NetworkManager must not depend on extern globals defined elsewhere.
 
 
-
-
 NetworkManager::NetworkManager()
     : host(nullptr),
       serverPeer(nullptr),
       isHost(false),
       isConnected(false),
       localPlayerID(0),
-      localSkinIndex(1),
-      localWeaponSkin(0), // default weapon skin
+      localSkinIndex(0),
+      localWeaponSkin(1), // Default to AK47
       localKills(0),
       localDeaths(0),
+      localTeamID(0), // 0 means not yet assigned (or none in FFA)
       selectedMapName("Forest"),
+      currentGameMode(OnlineGameMode::FREE_FOR_ALL),
+      timeLimit(0),    // Default to Kill limit active
+      killLimit(40),
+      roundLimit(8),
+      teamScores{0, 0, 0},
+      currentRoundNumber(0),
+      lastRoundWinnerID(0),
+      lastRoundGRScore(0),
+      lastRoundBLScore(0),
+      roundPhase(RoundPhase::IDLE),
       waitingForAssignment(false),
       nextPlayerID(1), // Host is always 0; clients start at 1, monotonically increasing
       joinState(JoinState::IDLE),
@@ -96,17 +105,17 @@ void NetworkManager::UnregisterPeerMapping(uint16_t incomingPeerID) {
     }
 }
 
-void NetworkManager::UpsertPlayer(uint32_t playerID, const std::string& username, int charSkin, int weaponSkin) {
+void NetworkManager::UpsertPlayer(uint32_t playerID, const std::string& username, int charSkin, int weaponSkin, int teamID) {
     for (auto& p : players) {
         if (p.peerID == playerID) {
-            // Update existing entry; do NOT change the ID.
-            p.username = username;
-            p.charSkin = charSkin;
+            p.username  = username;
+            p.charSkin  = charSkin;
             p.weaponSkin = weaponSkin;
+            p.teamID    = teamID;
             return;
         }
     }
-    players.push_back(PlayerInfo(playerID, username, charSkin, weaponSkin));
+    players.push_back(PlayerInfo(playerID, username, charSkin, weaponSkin, teamID));
 }
 
 bool NetworkManager::RemovePlayer(uint32_t playerID) {
@@ -139,7 +148,8 @@ bool NetworkManager::HostRoom(int port) {
     isConnected = true;
     localPlayerID = 0; 
 
-    UpsertPlayer(0, localUsername, localSkinIndex, localWeaponSkin);
+    UpsertPlayer(0, localUsername, localSkinIndex, localWeaponSkin, localTeamID);
+
 
     std::cout << "Hosting room on port " << port << std::endl;
     return true;
@@ -375,6 +385,73 @@ void NetworkManager::Disconnect() {
     joinState = JoinState::IDLE;
     pendingPeer = nullptr;
     joinTimeoutTimer = 0.0f;
+    ResetMatch();
+}
+
+void NetworkManager::ResetMatch() {
+    teamScores[0] = teamScores[1] = teamScores[2] = 0;
+    currentRoundNumber = 0;
+    lastRoundWinnerID = 0;
+    lastRoundGRScore = 0;
+    lastRoundBLScore = 0;
+    roundPhase = RoundPhase::IDLE;
+}
+
+int NetworkManager::GetTeamScore(int teamID) const {
+    if (teamID < 0 || teamID >= 3) return 0;
+    return teamScores[teamID];
+}
+
+void NetworkManager::RequestTeamChange(int teamID) {
+    // Mutate local state immediately so the client UI reflects the change without a round-trip.
+    localTeamID = teamID;
+    for (auto& pl : players) {
+        if (pl.peerID == localPlayerID) {
+            pl.teamID = teamID;
+            break;
+        }
+    }
+
+    PacketPlayerTeamChange pkt{};
+    pkt.header.type     = PacketType::PLAYER_TEAM_CHANGE;
+    pkt.header.playerID = localPlayerID;
+    pkt.teamID          = teamID;
+    SendPacket(&pkt, sizeof(pkt), true);
+}
+
+void NetworkManager::SetPlayerTeam(uint32_t playerID, int teamID) {
+    // Host-only: mutate the entry then broadcast.
+    for (auto& pl : players) {
+        if (pl.peerID == playerID) {
+            pl.teamID = teamID;
+            break;
+        }
+    }
+    if (playerID == localPlayerID) {
+        localTeamID = teamID;
+    }
+
+    PacketPlayerTeamChange pkt{};
+    pkt.header.type     = PacketType::PLAYER_TEAM_CHANGE;
+    pkt.header.playerID = playerID;
+    pkt.teamID          = teamID;
+    SendPacket(&pkt, sizeof(pkt), true);
+}
+
+void NetworkManager::UpdateLobbySettings(OnlineGameMode mode, int time, int kills, int rounds) {
+    currentGameMode = mode;
+    timeLimit       = time;
+    killLimit       = kills;
+    roundLimit      = rounds;
+
+    PacketLobbySettings pkt{};
+    pkt.header.type     = PacketType::LOBBY_SETTINGS;
+    pkt.header.playerID = 0; // from host
+    pkt.gameMode        = mode;
+    pkt.timeLimit       = time;
+    pkt.killLimit       = kills;
+    pkt.roundLimit      = rounds;
+    SendPacket(&pkt, sizeof(pkt), true);
 }
 
 void NetworkManager::Update() {
@@ -395,8 +472,20 @@ void NetworkManager::Update() {
                     uint16_t incomingPeerID = event.peer->incomingPeerID;
                     uint32_t newPlayerID = AllocatePlayerID();
                     RegisterPeerMapping(incomingPeerID, newPlayerID);
-                    UpsertPlayer(newPlayerID, "Unknown", 1, 0);
+                    UpsertPlayer(newPlayerID, "Unknown", 1, 0, 0);
 
+                    // Auto-assign late joiners to the smaller team in team modes so
+                    // matches stay balanced. FFA leaves them at teamID 0 (unassigned).
+                    if (currentGameMode == OnlineGameMode::TEAM_DEATHMATCH
+                        || currentGameMode == OnlineGameMode::ELIMINATION) {
+                        int grCount = 0, blCount = 0;
+                        for (const auto& pl : players) {
+                            if (pl.teamID == 1) grCount++;
+                            else if (pl.teamID == 2) blCount++;
+                        }
+                        int assignedTeam = (grCount <= blCount) ? 1 : 2;
+                        SetPlayerTeam(newPlayerID, assignedTeam);
+                    }
 
                     // Configure generous peer timeouts for internet/tunnel connections.
                     enet_peer_timeout(event.peer, 32, 5000, 30000);
@@ -408,7 +497,17 @@ void NetworkManager::Update() {
                     ENetPacket* idPktPtr = enet_packet_create(&idPkt, sizeof(idPkt), ENET_PACKET_FLAG_RELIABLE);
                     enet_peer_send(event.peer, 0, idPktPtr);
 
-                    
+                    // Also send current lobby settings to the new joiner
+                    PacketLobbySettings settingsPkt{};
+                    settingsPkt.header.type     = PacketType::LOBBY_SETTINGS;
+                    settingsPkt.header.playerID = 0;
+                    settingsPkt.gameMode        = currentGameMode;
+                    settingsPkt.timeLimit        = timeLimit;
+                    settingsPkt.killLimit        = killLimit;
+                    settingsPkt.roundLimit       = roundLimit;
+                    ENetPacket* sp = enet_packet_create(&settingsPkt, sizeof(settingsPkt), ENET_PACKET_FLAG_RELIABLE);
+                    enet_peer_send(event.peer, 0, sp);
+
                     for (const auto& existingPlayer : players) {
                         if (existingPlayer.peerID == newPlayerID) continue; // skip self
                         PacketPlayerConnect connectPacket{};
@@ -417,7 +516,9 @@ void NetworkManager::Update() {
                         strncpy(connectPacket.username, existingPlayer.username.c_str(),
                         sizeof(connectPacket.username) - 1);
                         connectPacket.username[sizeof(connectPacket.username) - 1] = '\0';
-                        connectPacket.charSkin = existingPlayer.charSkin;
+                        connectPacket.charSkin   = existingPlayer.charSkin;
+                        connectPacket.weaponSkin = existingPlayer.weaponSkin;
+                        connectPacket.teamID     = existingPlayer.teamID;
 
                         ENetPacket* p = enet_packet_create(&connectPacket, sizeof(connectPacket),
                                                             ENET_PACKET_FLAG_RELIABLE);
@@ -475,16 +576,16 @@ void NetworkManager::Update() {
                                 strncpy(announce.username, localUsername.c_str(),
                                         sizeof(announce.username) - 1);
                                 announce.username[sizeof(announce.username) - 1] = '\0';
-                                announce.charSkin = localSkinIndex;
+                                announce.charSkin   = localSkinIndex;
                                 announce.weaponSkin = localWeaponSkin;
+                                announce.teamID     = localTeamID;
                                 ENetPacket* p = enet_packet_create(
                                     &announce, sizeof(announce), ENET_PACKET_FLAG_RELIABLE);
                                 enet_peer_send(serverPeer, 0, p);
 
-                                // Add ourselves to our own local player list too. (The host will
-                                // also send a PLAYER_CONNECT for us via the rebroadcast — but
-                                // adding it here is idempotent thanks to UpsertPlayer.)
-                                UpsertPlayer(localPlayerID, localUsername, localSkinIndex, localWeaponSkin);
+                                // Add ourselves to our own local player list too.
+                                UpsertPlayer(localPlayerID, localUsername, localSkinIndex, localWeaponSkin, localTeamID);
+
                             }
                             // Host ignores this packet type.
                         }
@@ -501,14 +602,14 @@ void NetworkManager::Update() {
                             PacketPlayerConnect* connectPacket =
                                 reinterpret_cast<PacketPlayerConnect*>(netEvent.data.data());
 
-                            uint32_t playerID = connectPacket->header.playerID;
+                            uint32_t playerID  = connectPacket->header.playerID;
                             std::string uname(connectPacket->username);
-                            int skin = connectPacket->charSkin;
+                            int skin       = connectPacket->charSkin;
                             int weaponSkin = connectPacket->weaponSkin;
+                            int teamID     = connectPacket->teamID;
 
-                            // Dedupe + update in one shot. Never creates Unknown duplicates
-                            // because the host always sends the canonical entry.
-                            UpsertPlayer(playerID, uname, skin, weaponSkin);
+                            // Dedupe + update in one shot.
+                            UpsertPlayer(playerID, uname, skin, weaponSkin, teamID);
 
                             // Initialize player position for proximity voice chat
                             // Default position (0,0) - will be updated by first PLAYER_UPDATE
@@ -564,15 +665,17 @@ void NetworkManager::Update() {
                         if (netEvent.data.size() >= sizeof(PacketPlayerUpdate)) {
                             PacketPlayerUpdate* updatePacket =
                                 reinterpret_cast<PacketPlayerUpdate*>(netEvent.data.data());
-                            uint32_t playerID = updatePacket->header.playerID;
-                            // Preserve existing username if known.
+                            uint32_t playerID  = updatePacket->header.playerID;
+                            // Preserve existing username and teamID if known.
                             std::string username;
+                            int existingTeamID = 0;
                             if (auto* p = FindPlayer(playerID)) {
-                                username = p->username;
+                                username      = p->username;
+                                existingTeamID = p->teamID;
                             }
-                            int charSkin = updatePacket->charSkin;
+                            int charSkin   = updatePacket->charSkin;
                             int weaponSkin = updatePacket->weaponSkin;
-                            UpsertPlayer(playerID, username, charSkin, weaponSkin);
+                            UpsertPlayer(playerID, username, charSkin, weaponSkin, existingTeamID);
 
                             // Update player position for proximity voice chat
                             playerPositions[playerID] = updatePacket->position;
@@ -629,13 +732,15 @@ void NetworkManager::Update() {
                             if (netEvent.data.size() >= sizeof(PacketPlayerRespawn)) {
                                 PacketPlayerRespawn* respPacket =
                                     reinterpret_cast<PacketPlayerRespawn*>(netEvent.data.data());
-                                uint32_t playerID = respPacket->header.playerID;
-                                int charSkin = respPacket->charSkin;
+                                uint32_t playerID  = respPacket->header.playerID;
+                                int charSkin   = respPacket->charSkin;
                                 int weaponSkin = respPacket->weaponSkin;
-                                // Preserve existing username
+                                // Preserve existing username and teamID
                                 const PlayerInfo* existing = FindPlayer(playerID);
                                 std::string username = existing ? existing->username : "";
-                                UpsertPlayer(playerID, username, charSkin, weaponSkin);
+                                int existingTeamID   = existing ? existing->teamID   : 0;
+                                UpsertPlayer(playerID, username, charSkin, weaponSkin, existingTeamID);
+
 
                                 // Update player position for proximity voice chat
                                 playerPositions[playerID] = respPacket->spawnPosition;
@@ -662,6 +767,66 @@ void NetworkManager::Update() {
                                     ENET_PACKET_FLAG_RELIABLE);
                                 enet_peer_send(peer, 0, p);
                             }
+                        }
+                    } else if (packetType == PacketType::LOBBY_SETTINGS) {
+                        // Client-side apply of in-session settings rebroadcasts (the host already
+                        // applies the same fields directly on the new-joiner path).
+                        if (netEvent.data.size() >= sizeof(PacketLobbySettings)) {
+                            PacketLobbySettings* p =
+                                reinterpret_cast<PacketLobbySettings*>(netEvent.data.data());
+                            currentGameMode = p->gameMode;
+                            timeLimit       = p->timeLimit;
+                            killLimit       = p->killLimit;
+                            roundLimit      = p->roundLimit;
+                        }
+                    } else if (packetType == PacketType::PLAYER_TEAM_CHANGE) {
+                        if (netEvent.data.size() >= sizeof(PacketPlayerTeamChange)) {
+                            PacketPlayerTeamChange* p =
+                                reinterpret_cast<PacketPlayerTeamChange*>(netEvent.data.data());
+                            uint32_t changedID = p->header.playerID;
+                            for (auto& pl : players) {
+                                if (pl.peerID == changedID) {
+                                    pl.teamID = p->teamID;
+                                    break;
+                                }
+                            }
+                            if (changedID == localPlayerID) {
+                                localTeamID = p->teamID;
+                            }
+                            if (isHost) {
+                                // Rebroadcast to other peers (skip the sender).
+                                for (size_t i = 0; i < host->peerCount; ++i) {
+                                    ENetPeer* peer = &host->peers[i];
+                                    if (peer == event.peer) continue;
+                                    if (peer->state != ENET_PEER_STATE_CONNECTED) continue;
+                                    ENetPacket* q = enet_packet_create(
+                                        netEvent.data.data(), netEvent.data.size(),
+                                        ENET_PACKET_FLAG_RELIABLE);
+                                    enet_peer_send(peer, 0, q);
+                                }
+                            }
+                        }
+                    } else if (packetType == PacketType::ROUND_START) {
+                        if (netEvent.data.size() >= sizeof(PacketRoundStart)) {
+                            PacketRoundStart* p =
+                                reinterpret_cast<PacketRoundStart*>(netEvent.data.data());
+                            currentRoundNumber = p->roundNumber;
+                            roundPhase = RoundPhase::IN_ROUND;
+                        }
+                    } else if (packetType == PacketType::ROUND_END) {
+                        if (netEvent.data.size() >= sizeof(PacketRoundEnd)) {
+                            PacketRoundEnd* p =
+                                reinterpret_cast<PacketRoundEnd*>(netEvent.data.data());
+                            lastRoundWinnerID = p->winningTeamID;
+                            lastRoundGRScore  = p->grScore;
+                            lastRoundBLScore  = p->blScore;
+                            // The host already updated teamScores before broadcasting.
+                            // Mirror on the client side so score queries stay consistent.
+                            if (!isHost) {
+                                teamScores[1] = p->grScore;
+                                teamScores[2] = p->blScore;
+                            }
+                            roundPhase = RoundPhase::ROUND_OVER;
                         }
                     } else if (packetType == PacketType::VOICE_DATA) {
                         // Voice data packets are variable-length: header + seq + frameSize + only

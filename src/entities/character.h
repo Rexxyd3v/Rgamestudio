@@ -67,6 +67,10 @@ public:
     static void SetCombatAudioEnabled(bool enabled) { combatAudioEnabled = enabled; }
     static bool IsCombatAudioEnabled() { return combatAudioEnabled; }
 
+    // Team affiliation (online modes only). 0 = None / FFA, 1 = GR, 2 = BL.
+    int  GetTeamID() const { return teamID; }
+    void SetTeamID(int id) { teamID = id; }
+
     // Stats
     std::string GetName() const { return name; }
     void SetName(const std::string& n) { name = n; }
@@ -200,6 +204,7 @@ protected:
     float   feetOffset;    // vertical offset from sprite center to the feet, used for depth sort
     Vector2 aimTarget;
     float   weaponRotation;
+    int     teamID;        // 0 = None / FFA, 1 = GR, 2 = BL (synced via PacketPlayerTeamChange)
 
     std::map<CharState, Animation*>          animations;
     std::vector<std::shared_ptr<Projectile>> projectiles;

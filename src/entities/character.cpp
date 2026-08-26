@@ -77,7 +77,7 @@ Character::Character(Vector2 startPosition, const std::string& assetPath, float 
       jumpHeight(0.0f), jumpVelocity(0.0f), baseHeight(0.0f), floorHeight(0.0f), feetOffset(10.0f), weaponRotation(0.0f),
       justShot(false), isMonster(false), kills(0), deaths(0), muzzleFlashTimer(0.0f),
       dashTimer(0.0f), dashCooldown(0.0f), dashDirection{0.0f, 0.0f}, shieldTimer(0.0f), shieldCooldown(0.0f),
-      reloadTimer(0.0f), lastHitTimer(0.0f), healthDisplay(100.0f), godMode(false) {
+      reloadTimer(0.0f), lastHitTimer(0.0f), healthDisplay(100.0f), godMode(false), teamID(0) {
 
     for (int i = 0; i < 3; ++i) {
         ammo[i] = WEAPONS[i].maxAmmo;
@@ -554,13 +554,23 @@ void Character::DrawUI() {
         float nameYOffset = 800.0f * scale;
         float nameY = draw_y - nameYOffset;
         float nameX = position.x - textWidth / 2.0f;
-        // Background pill for readability against any ground
+        // Background pill for readability against any ground.
+        // Team-tinted (subtle) so players can tell teams apart at a glance.
         Color bg = {0, 0, 0, (unsigned char)(160.0f * alpha)};
+        if (teamID == 1)      bg = { 30,  60, 120, (unsigned char)(180.0f * alpha) };
+        else if (teamID == 2) bg = { 120, 30,  30, (unsigned char)(180.0f * alpha) };
         DrawRectangle((int)nameX - namePadding, (int)nameY - namePadding,
                       textWidth + namePadding * 2, textHeight + namePadding * 2,
                       bg);
-        // Name text color: monsters in red, regular characters in white
-        Color nameColor = isMonster ? Color{ 255, 100, 100, 255 } : RAYWHITE;
+        // Name text color:
+        //   monsters           -> red
+        //   GR (teamID == 1)   -> blue
+        //   BL (teamID == 2)   -> red
+        //   otherwise          -> white
+        Color nameColor = RAYWHITE;
+        if (isMonster)            nameColor = Color{ 255, 100, 100, 255 };
+        else if (teamID == 1)     nameColor = Color{ 180, 220, 255, 255 };
+        else if (teamID == 2)     nameColor = Color{ 255, 180, 180, 255 };
         nameColor.a = (unsigned char)(nameColor.a * alpha);
         DrawText(name.c_str(), (int)nameX, (int)nameY, nameFontSize, nameColor);
     }

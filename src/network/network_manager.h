@@ -77,7 +77,31 @@ public:
     int localWeaponSkin;
     int localKills;
     int localDeaths;
+    int localTeamID; // 0 = None, 1 = GR, 2 = BL
     std::string selectedMapName; // Map folder name from registry (e.g. "Forest")
+
+    // Lobby Settings
+    OnlineGameMode currentGameMode;
+    int timeLimit;
+    int killLimit;
+    int roundLimit;
+
+    // Match state (host-authoritative, mirrored on clients).
+    // teamScores[i] = total rounds won (Elimination) or kill count (TDM) for team i.
+    int teamScores[3];
+    int currentRoundNumber;     // 0 = match hasn't started, 1..N = current round
+    int lastRoundWinnerID;      // 0 = draw, 1 = GR, 2 = BL
+    int lastRoundGRScore;
+    int lastRoundBLScore;
+    enum class RoundPhase { IDLE, IN_ROUND, ROUND_OVER, MATCH_OVER };
+    RoundPhase roundPhase;
+
+    void RequestTeamChange(int teamID);
+    void UpdateLobbySettings(OnlineGameMode mode, int time, int kills, int rounds);
+
+    // Zero all match-state counters. Call from Disconnect and at match end.
+    void ResetMatch();
+    int  GetTeamScore(int teamID) const;
 
 private:
     NetworkManager();
@@ -104,10 +128,11 @@ private:
         std::string username;
         int charSkin;
         int weaponSkin;         // Weapon skin ID (0 = default)
+        int teamID;
         bool isReady;
 
-        PlayerInfo(uint32_t id, const std::string& name, int skin, int weaponSkin)
-            : peerID(id), username(name), charSkin(skin), weaponSkin(weaponSkin), isReady(false) {}
+        PlayerInfo(uint32_t id, const std::string& name, int skin, int weaponSkin, int team)
+            : peerID(id), username(name), charSkin(skin), weaponSkin(weaponSkin), teamID(team), isReady(false) {}
     };
     std::vector<PlayerInfo> players;
 
@@ -133,10 +158,14 @@ public:
     // Add or update a player entry by authoritative playerID. Idempotent.
     // If a player with the same ID already exists, updates username/skin/weaponSkin. Otherwise inserts.
     // Never creates duplicates and never generates a new ID.
-    void UpsertPlayer(uint32_t playerID, const std::string& username, int charSkin, int weaponSkin);
+    void UpsertPlayer(uint32_t playerID, const std::string& username, int charSkin, int weaponSkin, int teamID);
 
     // Remove a player entry by authoritative playerID. Returns true if removed.
     bool RemovePlayer(uint32_t playerID);
+
+    // Set a player's team ID (host-only helper). Mutates PlayerInfo and broadcasts
+    // a PacketPlayerTeamChange to every connected peer.
+    void SetPlayerTeam(uint32_t playerID, int teamID);
 
     // Find a player entry by authoritative playerID. Returns nullptr if not present.
     const PlayerInfo* FindPlayer(uint32_t playerID) const;
