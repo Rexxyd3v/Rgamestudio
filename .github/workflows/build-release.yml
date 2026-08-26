@@ -55,6 +55,7 @@ jobs:
           mkdir -p bin
 
           g++ \
+            -I. \
             src/*.cpp \
             src/screens/*.cpp \
             src/utils/*.cpp \
