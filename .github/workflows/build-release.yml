@@ -16,7 +16,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # Setup MSYS2
       - name: Setup MSYS2
         uses: msys2/setup-msys2@v2
         with:
@@ -32,7 +31,24 @@ jobs:
             mingw-w64-ucrt-x86_64-libvorbis
             mingw-w64-ucrt-x86_64-miniaudio
 
-      # Build
+      - name: Check dependencies
+        shell: msys2 {0}
+        run: |
+          echo "=== GCC ==="
+          g++ --version
+
+          echo "=== Raylib ==="
+          pkg-config --modversion raylib
+
+          echo "=== ENet ==="
+          pkg-config --modversion libenet || pkg-config --modversion enet
+
+          echo "=== Opus ==="
+          pkg-config --modversion opus
+
+          echo "=== Miniaudio ==="
+          pkg-config --modversion miniaudio || true
+
       - name: Build Rgamestudio
         shell: msys2 {0}
         run: |
@@ -47,57 +63,103 @@ jobs:
             src/network/*.cpp \
             src/ui/*.cpp \
             src/voice/*.cpp \
-            -o bin/Rgamestudio.exe \
             -std=c++17 \
             -O2 \
+            -o bin/Rgamestudio.exe \
+            $(pkg-config --cflags raylib opus) \
+            -I/ucrt64/include \
+            -lraylib \
+            -lenet \
+            -lopus \
+            -lopusfile \
+            -lvorbis \
+            -lvorbisfile \
             -lws2_32 \
-            $(pkg-config --cflags raylib opus libenet miniaudio) \
-            $(pkg-config --libs raylib opus libenet miniaudio)
+            -lwinmm \
+            -lgdi32 \
+            -lopengl32
 
-      # Package
-      - name: Collect DLLs and Assets
+      - name: Verify EXE
         shell: msys2 {0}
         run: |
+          if [ ! -f bin/Rgamestudio.exe ]; then
+            echo "ERROR: Rgamestudio.exe was not created."
+            exit 1
+          fi
+
+          echo "Build successful!"
+          ls -lh bin/Rgamestudio.exe
+
+      - name: Prepare Release Package
+        shell: msys2 {0}
+        run: |
+          rm -rf release_package
           mkdir -p release_package
 
           cp bin/Rgamestudio.exe release_package/
-          cp -r assets release_package/
 
-          ldd bin/Rgamestudio.exe \
-            | grep '/ucrt64/bin' \
-            | awk '{print $3}' \
-            | xargs -I{} cp {} release_package/
+          if [ -d assets ]; then
+            cp -r assets release_package/
+          fi
 
-      # Zip
+          echo "Collecting required DLLs..."
+
+          ldd bin/Rgamestudio.exe | grep '/ucrt64/bin' | awk '{print $3}' | while read dll; do
+            if [ -f "$dll" ]; then
+              cp "$dll" release_package/
+            fi
+          done
+
+          echo "Release package:"
+          find release_package -maxdepth 2 -type f
+
       - name: Create Release ZIP
         shell: pwsh
         run: |
           $tag = "${{ github.ref_name }}"
-          Compress-Archive `
-            -Path release_package\* `
-            -DestinationPath "Rgamestudio-$tag-windows.zip"
+          $zip = "Rgamestudio-$tag-windows.zip"
 
-      # Release
-      - name: Upload GitHub Release
+          if (Test-Path $zip) {
+            Remove-Item $zip -Force
+          }
+
+          Compress-Archive `
+            -Path "release_package\*" `
+            -DestinationPath $zip `
+            -CompressionLevel Optimal
+
+          Write-Host "Created $zip"
+          Get-Item $zip | Format-List Name,Length,FullName
+
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ github.ref_name }}
           name: "Rgamestudio ${{ github.ref_name }}"
           body: |
-            ## Rgamestudio ${{ github.ref_name }}
+            # Rgamestudio ${{ github.ref_name }}
 
-            ### How to Play
+            ## Download
+
+            Download the Windows ZIP below and extract it.
+
+            ## How to Play
+
             1. Download `Rgamestudio-${{ github.ref_name }}-windows.zip`
             2. Extract the ZIP.
-            3. Run `Rgamestudio.exe`.
+            3. Open the extracted folder.
+            4. Run `Rgamestudio.exe`.
 
-            ### Requirements
-            - Windows 10/11 (64-bit)
+            ## Requirements
+
+            - Windows 10/11
+            - 64-bit Windows
 
           files: |
             Rgamestudio-${{ github.ref_name }}-windows.zip
-
           draft: false
           prerelease: false
+          fail_on_unmatched_files: true
 
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
